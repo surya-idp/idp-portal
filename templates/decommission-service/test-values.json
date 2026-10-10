@@ -1,0 +1,7 @@
+{
+  "values": {
+    "entity": "component:default/template-ci",
+    "confirm": true
+  },
+  "secrets": {}
+}

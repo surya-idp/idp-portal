@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Template CI: prove that the python-service template still produces a working service.
+# Template CI: prove that the templates still work.
 #
+# python-service (creates a service):
 #   1. start a throwaway Backstage backend (scripts/template-ci.app-config.yaml: in-memory DB, no network)
 #   2. render the template with the real scaffolder (dry-run API)
+#      and dry-run decommission-service against a stand-in catalog entry
 #   3. run the rendered service's own checks: lock file, lint, format, types, tests
 #   4. build its image                                    (skip with SKIP_IMAGE=1)
 #   5. put its deploy files into idp-gitops and run that repo's validate.sh
@@ -58,19 +60,75 @@ installed = {a["id"] for a in json.load(open(sys.argv[2]))}
 missing = [s["action"] for s in template["spec"]["steps"] if s["action"] not in installed]
 if missing:
     sys.exit(f"template uses actions this backend does not have: {missing}")
-print(f"backend ready; all {len(template['spec']['steps'])} template steps use installed actions")
+print(f"backend ready; all {len(template['spec']['steps'])} steps of {sys.argv[1]} use installed actions")
 PY
 
 step "[2/5] Rendering $TEMPLATE with the scaffolder (dry run)"
 OUT="$WORK/$SERVICE"
 node scripts/template-dry-run.mjs "$TEMPLATE" "$TEMPLATE/test-values.json" "$OUT"
+
+echo
+echo "    decommission-service (dry run against the stand-in catalog entry)"
+DECOM=templates/decommission-service
+python3 - "$DECOM/template.yaml" "$actions" <<'PY'
+import json, sys, yaml
+template = yaml.safe_load(open(sys.argv[1]))
+installed = {a["id"] for a in json.load(open(sys.argv[2]))}
+missing = [s["action"] for s in template["spec"]["steps"] if s["action"] not in installed]
+if missing:
+    sys.exit(f"{sys.argv[1]} uses actions this backend does not have: {missing}")
+PY
+# The catalog reads its file location a few seconds after start.
+for _ in $(seq 1 30); do
+  curl -sf -H "Authorization: Bearer $TEMPLATE_CI_TOKEN" -o /dev/null \
+    "$BACKSTAGE_URL/api/catalog/entities/by-name/component/default/template-ci" && break
+  sleep 2
+done
+node scripts/template-dry-run.mjs "$DECOM" "$DECOM/test-values.json" "$WORK/decommission"
+# The pull-request step sends every file in the workspace as an addition. A removal must
+# therefore leave the workspace empty, or the PR would add files to idp-gitops.
+extra="$(find "$WORK/decommission" -type f ! -name .dry-run-output.json)"
+if [ -n "$extra" ]; then
+  echo "decommission-service left files in the workspace; its PR would ADD them:"; echo "$extra"; exit 1
+fi
+
+
+echo
+echo "    decommission-service on a service from another template (no deployment, no image)"
+for _ in $(seq 1 30); do
+  curl -sf -H "Authorization: Bearer $TEMPLATE_CI_TOKEN" -o /dev/null \
+    "$BACKSTAGE_URL/api/catalog/entities/by-name/component/default/template-ci-library" && break
+  sleep 2
+done
+python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1])); d['values']['entity']='component:default/template-ci-library'
+json.dump(d,open(sys.argv[2],'w'))" "$DECOM/test-values.json" "$WORK/other-values.json"
+node scripts/template-dry-run.mjs "$DECOM" "$WORK/other-values.json" "$WORK/decommission-other" | tee "$WORK/other.log"
+# One removal template for every creation template: what a service did not record is skipped,
+# and what it did record (here only the repository) is still handled.
+for step in files pr merge ecr; do
+  grep -q "^\[$step\] (skipped) .*condition" "$WORK/other.log" \
+    || { echo "step '$step' was not skipped for a service without that annotation"; exit 1; }
+done
+grep -q '^\[archive\] (skipped) Skipping because .* does not support dry-run' "$WORK/other.log" \
+  || { echo "the archive step should still apply to a service that only has a repository"; exit 1; }
+
 kill -- -"$BACKEND_PID" 2>/dev/null || true
 BACKEND_PID=""
 if grep -rIl '\${{' "$OUT" --exclude-dir=.github; then
   echo "unrendered template expressions in the files above"; exit 1
 fi
-grep -q 'backstage.io/source-template' "$OUT/catalog-info.yaml" \
-  || { echo "catalog-info.yaml has no backstage.io/source-template annotation"; exit 1; }
+# The contract in templates/README.md: day-2 templates find a service's resources through these.
+for annotation in backstage.io/source-template idp.surya-idp/template-version \
+    github.com/project-slug idp.surya-idp/gitops-path idp.surya-idp/ecr-repository; do
+  grep -q "$annotation" "$OUT/catalog-info.yaml" \
+    || { echo "catalog-info.yaml has no $annotation annotation"; exit 1; }
+done
+# ... and they must point at what the template really wrote.
+gitops_path="$(python3 -c "import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))['metadata']['annotations']['idp.surya-idp/gitops-path'])" "$OUT/catalog-info.yaml")"
+[ -d "$OUT/env-config-change/$gitops_path" ] \
+  || { echo "annotation gitops-path=$gitops_path, but the template wrote no such folder"; exit 1; }
 
 step "[3/5] The rendered service's own checks (what the shared CI workflow runs)"
 (
@@ -107,4 +165,4 @@ cp -r "$OUT/env-config-change/." "$WORK/idp-gitops/"
 [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "idp-gitops validate.sh failed"; exit 1; }
 
 echo
-echo "Template OK: rendered, checked, built and validated."
+echo "Templates OK: python-service rendered, checked, built and validated; decommission-service dry run clean."
