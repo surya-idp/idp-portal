@@ -1,0 +1,125 @@
+# idp day-2 template: remove a service that was created from a golden-path template.
+#
+# Creating a service touches four places, so removing one must too. Doing it by hand means four
+# tools and four chances to forget one (an abandoned service keeps 2 pods running on small nodes).
+#
+#   1. catalog:fetch                   -> the chosen service's catalog entry (name, repo)
+#   2. idp:github:list-files           -> every file under apps/<name> in idp-gitops
+#   3. publish:github:pull-request     -> PR in idp-gitops deleting those files (the audit record)
+#   4. idp:github:await-ci-auto-merge  -> merges it when `validate` is green; Argo CD then removes
+#                                         the Application, pods, Service and the ALB route
+#   5. idp:aws:ecr:delete-repository   -> ECR svc/<name> and its images
+#   6. idp:github:archive-repo         -> the source repo becomes read-only (restorable)
+#   7. idp:catalog:unregister          -> the service leaves the catalog
+#
+# Order matters: the deploy config goes first, so nothing is left running that points at images
+# or a catalog entry which no longer exist. Every step is safe to run again, so a run that
+# failed halfway can simply be started over.
+#
+# What can be undone: the idp-gitops PR (revert it) and the archive (unarchive in repo
+# settings). What cannot: the images in ECR. They can be rebuilt by pushing to the repo.
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: decommission-service
+  title: Decommission a service
+  description: Removes a golden-path service everywhere - deployment, load balancer route, images, catalog entry - and archives its repository.
+  tags:
+    - day-2
+    - golden-path
+spec:
+  owner: DSurya11
+  type: service
+
+  parameters:
+    - title: Which service
+      required: [entity, confirm]
+      properties:
+        entity:
+          title: Service
+          type: string
+          description: Only services created from a golden-path template are listed.
+          ui:field: EntityPicker
+          ui:options:
+            # Keyed on the platform-wide marker, not on one template's name: every golden-path
+            # template writes idp.surya-idp/template-version, so services from a future
+            # template (Go, Node ...) appear here with no change. The marker is also a promise
+            # about layout: deploy files in idp-gitops apps/<name>, images in ECR svc/<name>,
+            # repo surya-idp/<name>. A template that sets it must follow that layout.
+            # The platform's own components do not have it and cannot be picked.
+            catalogFilter:
+              kind: Component
+              metadata.annotations.idp.surya-idp/template-version:
+                exists: true
+            defaultKind: Component
+        confirm:
+          title: I understand that this stops the service, deletes its images and archives its repository
+          type: boolean
+          # Schema rule, not a hint: the form cannot be submitted until the box is ticked.
+          enum: [true]
+
+  steps:
+    - id: entity
+      name: Read the catalog entry
+      action: catalog:fetch
+      input:
+        entityRef: ${{ parameters.entity }}
+
+    - id: files
+      name: Find the deploy files
+      action: idp:github:list-files
+      input:
+        repoUrl: github.com?owner=surya-idp&repo=idp-gitops
+        directory: apps/${{ steps.entity.output.entity.metadata.name }}
+
+    - id: pr
+      name: Open removal PR in idp-gitops
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?owner=surya-idp&repo=idp-gitops
+        branchName: remove-${{ steps.entity.output.entity.metadata.name }}
+        title: "Remove ${{ steps.entity.output.entity.metadata.name }} (decommission)"
+        description: |
+          Removes `${{ steps.entity.output.entity.metadata.name }}` from the dev cluster: deleting `apps/${{ steps.entity.output.entity.metadata.name }}`
+          makes the ApplicationSet delete its Argo CD Application, and with it the pods, the Service
+          and the route on the shared ALB.
+
+          Nobody needs to merge this: Backstage merges it when the `validate` check passes. To bring
+          the service back, revert this PR.
+
+          Requested by `${{ user.ref }}` through the Backstage decommission-service template.
+        filesToDelete: ${{ steps.files.output.files }}
+
+    - id: merge
+      name: Merge the removal PR
+      action: idp:github:await-ci-auto-merge
+      input:
+        deployRepoUrl: github.com?owner=surya-idp&repo=idp-gitops
+        pullRequestNumber: ${{ steps.pr.output.pullRequestNumber }}
+        mergeMethod: SQUASH
+        timeoutMinutes: 10
+
+    - id: ecr
+      name: Delete the images
+      action: idp:aws:ecr:delete-repository
+      input:
+        serviceName: ${{ steps.entity.output.entity.metadata.name }}
+
+    - id: archive
+      name: Archive the repository
+      action: idp:github:archive-repo
+      input:
+        repoUrl: github.com?owner=surya-idp&repo=${{ steps.entity.output.entity.metadata.name }}
+
+    - id: unregister
+      name: Remove from the catalog
+      action: idp:catalog:unregister
+      input:
+        entityRef: ${{ parameters.entity }}
+
+  output:
+    links:
+      - title: Removal PR
+        url: ${{ steps.pr.output.remoteUrl }}
+      - title: Archived repository
+        url: https://github.com/surya-idp/${{ steps.entity.output.entity.metadata.name }}

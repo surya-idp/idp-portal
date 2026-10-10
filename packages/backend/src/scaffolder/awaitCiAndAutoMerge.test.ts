@@ -191,6 +191,58 @@ describe('awaitCiAndAutoMerge', () => {
     );
   });
 
+  it('skips the CI wait when the PR pins no image (a removal PR)', async () => {
+    const { api, calls } = fakeGitHub({
+      serviceRuns: [[run('completed', 'failure')]],
+      prs: [
+        pr(),
+        pr({ merged: true, state: 'closed', merge_commit_sha: 'merged5' }),
+      ],
+    });
+    const {
+      serviceRepo: _repo,
+      commitSha: _sha,
+      ...withoutService
+    } = options(api);
+    await expect(awaitCiAndAutoMerge(withoutService)).resolves.toEqual({
+      ciRunUrl: '',
+      mergeCommitSha: 'merged5',
+    });
+    expect(calls).not.toContain(`${RUNS} svc`);
+    expect(calls).toContain('graphql enablePullRequestAutoMerge');
+  });
+
+  it('still waits for the merge when the checks cannot be read', async () => {
+    const { api } = fakeGitHub({
+      serviceRuns: [[run('completed', 'success')]],
+      prs: [
+        pr(),
+        pr(),
+        pr({ merged: true, state: 'closed', merge_commit_sha: 'merged6' }),
+      ],
+    });
+    const reader: GitHubApi = {
+      request: async (route, params) => {
+        if (route === RUNS && params?.repo === 'gitops') {
+          throw new Error('Resource not accessible by integration');
+        }
+        return api.request(route, params);
+      },
+      graphql: api.graphql,
+    };
+    const messages: string[] = [];
+    await expect(
+      awaitCiAndAutoMerge({
+        ...options(api),
+        reader,
+        log: message => messages.push(message),
+      }),
+    ).resolves.toMatchObject({ mergeCommitSha: 'merged6' });
+    expect(
+      messages.filter(m => m.includes('Cannot read the checks')),
+    ).toHaveLength(1);
+  });
+
   it('skips auto-merge when the PR is already merged', async () => {
     const { api, calls } = fakeGitHub({
       serviceRuns: [[run('completed', 'success')]],

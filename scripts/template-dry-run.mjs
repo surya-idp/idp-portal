@@ -85,6 +85,8 @@ if (failed.length > 0) {
 }
 
 fs.rmSync(outDir, { recursive: true, force: true });
+// A template that only removes things leaves an empty workspace.
+fs.mkdirSync(outDir, { recursive: true });
 for (const file of body.directoryContents ?? []) {
   const target = path.join(outDir, file.path);
   fs.mkdirSync(path.dirname(target), { recursive: true });

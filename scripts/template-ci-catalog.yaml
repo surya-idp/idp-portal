@@ -1,0 +1,15 @@
+# Catalog content of the throwaway template-CI backend (scripts/template-ci.app-config.yaml).
+# The decommission-service template starts by reading a catalog entry, so a dry run needs one.
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: template-ci
+  description: Stand-in for a service created from the python-service template
+  annotations:
+    github.com/project-slug: surya-idp/template-ci
+    backstage.io/source-template: template:default/python-service
+    idp.surya-idp/template-version: "2"
+spec:
+  type: service
+  lifecycle: experimental
+  owner: user:default/guest

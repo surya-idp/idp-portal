@@ -32,8 +32,12 @@ export interface AwaitCiAndAutoMergeOptions {
   reader: GitHubApi;
   /** Acts on the deploy PR; must be able to write pull requests in the deploy repo. */
   writer: GitHubApi;
-  serviceRepo: RepoRef;
-  commitSha: string;
+  /**
+   * The repo and commit whose CI must be green before the PR is merged. Leave both out when
+   * the PR does not depend on an image (for example a PR that removes a service).
+   */
+  serviceRepo?: RepoRef;
+  commitSha?: string;
   deployRepo: RepoRef;
   pullRequestNumber: number;
   mergeMethod: 'MERGE' | 'SQUASH' | 'REBASE';
@@ -131,16 +135,20 @@ export async function awaitCiAndAutoMerge(
   const prParams = { ...deployRepo, pull_number: pullRequestNumber };
   const prName = `${deployRepo.owner}/${deployRepo.repo}#${pullRequestNumber}`;
 
-  // 1. The service CI run for the first commit.
-  const serviceName = `${serviceRepo.owner}/${serviceRepo.repo}`;
-  log(
-    `Waiting for CI of ${serviceName} at ${commitSha.slice(
-      0,
-      7,
-    )} (it builds the image this deploy pins)`,
-  );
+  // 1. The service CI run for the first commit (skipped when the PR pins no image).
   let ciRunUrl = '';
-  for (;;) {
+  const serviceName = serviceRepo
+    ? `${serviceRepo.owner}/${serviceRepo.repo}`
+    : '';
+  if (serviceRepo && commitSha) {
+    log(
+      `Waiting for CI of ${serviceName} at ${commitSha.slice(
+        0,
+        7,
+      )} (it builds the image this deploy pins)`,
+    );
+  }
+  while (serviceRepo && commitSha) {
     const verdict = await runsVerdict(reader, serviceRepo, commitSha);
     if (verdict.state === 'success') {
       ciRunUrl = verdict.url;
@@ -198,6 +206,7 @@ export async function awaitCiAndAutoMerge(
   }
 
   // 3. Wait for the merge; report a failed check instead of timing out silently.
+  let checksUnreadableLogged = false;
   for (;;) {
     const { data: current } = await writer.request(prRoute, prParams);
     if (current.merged) {
@@ -212,7 +221,22 @@ export async function awaitCiAndAutoMerge(
     if (current.state === 'closed') {
       throw new Error(`The deploy PR ${prName} was closed without merging.`);
     }
-    const checks = await runsVerdict(reader, deployRepo, current.head.sha);
+    // Reading the checks only improves the error message. If the reader may not list
+    // workflow runs (a GitHub App without Actions permission), keep waiting for the merge:
+    // GitHub still enforces the checks either way.
+    let checks: RunsVerdict = { state: 'pending' };
+    try {
+      checks = await runsVerdict(reader, deployRepo, current.head.sha);
+    } catch (error) {
+      if (!checksUnreadableLogged) {
+        log(
+          `Cannot read the checks of ${prName} (${
+            (error as Error).message
+          }); waiting for the merge only`,
+        );
+        checksUnreadableLogged = true;
+      }
+    }
     if (checks.state === 'failed') {
       throw new Error(
         `A check on the deploy PR ${prName} ended with "${checks.conclusion}": ${checks.url}. ` +

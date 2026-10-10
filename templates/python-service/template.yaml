@@ -93,7 +93,9 @@ spec:
               github.com/project-slug: surya-idp/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
               backstage.io/kubernetes-id: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
               backstage.io/techdocs-ref: dir:.
-              # Bump when the skeleton changes in a way existing services should adopt.
+              # The platform-wide marker of a golden-path service: day-2 templates such as
+              # decommission-service list services by it. Every golden-path template must
+              # write it. Bump when the skeleton changes in a way existing services should adopt.
               idp.surya-idp/template-version: "2"
             tags:
               - python

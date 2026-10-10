@@ -22,6 +22,11 @@ integrations:
     - host: github.com
       token: not-a-real-token
 
-# No network: the template under test is sent in the request, not read from the catalog.
+# No network: the template under test is sent in the request, not read from the catalog. The
+# one local file is a stand-in service for templates that act on an existing catalog entry.
 catalog:
-  locations: []
+  rules:
+    - allow: [Component]
+  locations:
+    - type: file
+      target: ../../scripts/template-ci-catalog.yaml
