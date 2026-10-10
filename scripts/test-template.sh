@@ -7,12 +7,14 @@
 #      and dry-run decommission-service against a stand-in catalog entry
 #   3. run the rendered service's own checks: lock file, lint, format, types, tests
 #   4. build its image                                    (skip with SKIP_IMAGE=1)
-#   5. put its deploy files into idp-gitops and run that repo's validate.sh
+#   5. put its deploy files into idp-gitops and run that repo's validate.sh, which also
+#      applies the platform's admission policies to them
 #
 # A template change that would hand developers a broken service fails here, before merge.
 #
 #   ./scripts/test-template.sh
-# Needs: node + yarn install, uv, docker, kubectl, kubeconform, python3 + PyYAML, git.
+# Needs: node + yarn install, uv, docker, kubectl, kubeconform, helm, kyverno CLI,
+# python3 + PyYAML, git.
 # GITOPS_REF picks the idp-gitops branch; default: the branch named like this one if it
 # exists there (paired pull requests), else main.
 set -euo pipefail
@@ -197,7 +199,7 @@ cp -r "$OUT/env-config-change/." "$WORK/idp-gitops/"
 mkdir -p "$WORK/idp-gitops/apps/$SERVICE-pg"
 cp -r "$WORK/$SERVICE-postgres/env-config-change/apps/$SERVICE/." "$WORK/idp-gitops/apps/$SERVICE-pg/"
 grep -rl "$SERVICE" "$WORK/idp-gitops/apps/$SERVICE-pg" | xargs sed -i "s/$SERVICE/$SERVICE-pg/g"
-"$WORK/idp-gitops/scripts/validate.sh" | grep -A2 "apps/$SERVICE/"
+"$WORK/idp-gitops/scripts/validate.sh" | grep -E -A2 "apps/$SERVICE(-pg)?/|FAIL"
 # validate.sh's exit code, not grep's
 [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "idp-gitops validate.sh failed"; exit 1; }
 
