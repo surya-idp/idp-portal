@@ -1,5 +1,6 @@
 # The pipeline itself lives in surya-idp/idp-platform (one place for every service):
-# lint, format check, type check, tests + coverage gate, arm64 image, Trivy, push to ECR on main.
+# lint, format check, type check, tests + coverage gate, arm64 image, Trivy, push to ECR on main,
+# then signed build provenance and a signed SBOM for the pushed image.
 # It is pinned to a commit; Dependabot opens the PR when a new version is released.
 #
 # Copied WITHOUT templating: GitHub's ${{ }} syntax would clash with the scaffolder's.
@@ -18,7 +19,8 @@ permissions: {}
 
 jobs:
   ci:
-    uses: surya-idp/idp-platform/.github/workflows/python-service.yml@8f097a3c1aba497df996903f7819edfc14de0393 # v1.0.0
+    uses: surya-idp/idp-platform/.github/workflows/python-service.yml@291df7b9774aca418fe913830c018e35089739ac # v2.0.0
     permissions:
       contents: read
-      id-token: write   # OIDC to AWS for the ECR push, no stored credentials
+      id-token: write       # OIDC to AWS for the ECR push and to Sigstore for signing: no stored keys
+      attestations: write   # signed build provenance + SBOM for every pushed image
