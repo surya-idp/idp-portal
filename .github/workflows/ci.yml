@@ -47,6 +47,11 @@ jobs:
       - name: Typecheck
         run: yarn tsc
 
+      - name: Unit tests (custom scaffolder actions)
+        run: yarn workspace backend test
+        env:
+          CI: "true"
+
       - name: Build backend bundle
         run: yarn build:backend
 

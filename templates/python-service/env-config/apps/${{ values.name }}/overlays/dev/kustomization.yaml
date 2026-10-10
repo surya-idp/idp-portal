@@ -1,5 +1,5 @@
-# First deploy is pinned to the repo's initial commit, which that repo's CI builds and
-# pushes. Merge this PR once that CI run is green (the pod pulls the image by this tag).
+# First deploy is pinned to the repo's initial commit, which that repo's CI builds and pushes.
+# After that, Argo CD Image Updater rewrites newTag on every new image (commits by idp-ci-bot).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: ${{ values.name }}

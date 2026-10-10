@@ -2,12 +2,16 @@
 #
 #   1. render skeleton          -> FastAPI app, Dockerfile, CI, catalog-info.yaml
 #   2. publish:github           -> new public repo surya-idp/<name>; its CI builds the image
-#   3. render env-config slice  -> Deployment/Service/Ingress/HPA/PDB + Argo Application,
-#                                  image pinned to the new repo's first commit
-#   4. publish:github:pull-request -> PR in idp-gitops (the deploy gate)
+#   3. render env-config slice  -> apps/<name>: Deployment/Service/Ingress/HPA/PDB, image pinned
+#                                  to the new repo's first commit. No Argo Application: the
+#                                  ApplicationSet in idp-gitops finds apps/<name>/overlays/dev
+#   4. publish:github:pull-request -> PR in idp-gitops (the audit record of the deploy)
 #   5. catalog:register         -> the service shows up in Backstage immediately
+#   6. idp:github:await-ci-auto-merge -> waits for the new repo's CI (the image), then turns on
+#                                  GitHub auto-merge; GitHub merges when `validate` is green
 #
-# Merge the PR once the new repo's CI is green; Argo CD deploys it within ~3 minutes.
+# No human step: Argo CD deploys within ~3 minutes of the merge. Later pushes to the service
+# repo are rolled out by Argo CD Image Updater (idp-gitops/platform/image-updater).
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
@@ -91,11 +95,14 @@ spec:
         branchName: add-${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
         title: "Deploy ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }} (golden path)"
         description: |
-          Adds `${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}` to the dev cluster: Argo CD Application, Deployment,
+          Adds `${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}` to the dev cluster: Deployment,
           Service, Ingress (shared ALB, path `/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}`), HPA and PDB.
 
           Image: `svc/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}:${{ steps.publish.output.commitHash }}`, built by
-          ${{ steps.publish.output.remoteUrl }}/actions. **Merge once that run is green.**
+          ${{ steps.publish.output.remoteUrl }}/actions.
+
+          Nobody needs to merge this: once that CI run is green, Backstage enables auto-merge
+          and GitHub merges when the `validate` check passes.
 
           Created by the Backstage python-service template.
         sourcePath: ./env-config-change
@@ -108,13 +115,24 @@ spec:
         repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
         catalogInfoPath: /catalog-info.yaml
 
+    # Last, so a slow or red CI run still leaves a registered service and an open PR.
+    - id: automerge
+      name: Wait for CI, then merge the deploy PR
+      action: idp:github:await-ci-auto-merge
+      input:
+        serviceRepoUrl: ${{ parameters.repoUrl }}
+        commitSha: ${{ steps.publish.output.commitHash }}
+        deployRepoUrl: github.com?owner=surya-idp&repo=idp-gitops
+        pullRequestNumber: ${{ steps.pr.output.pullRequestNumber }}
+        token: ${{ secrets.USER_OAUTH_TOKEN }}
+
   output:
     links:
       - title: Repository
         url: ${{ steps.publish.output.remoteUrl }}
       - title: CI runs
         url: ${{ steps.publish.output.remoteUrl }}/actions
-      - title: Deploy PR (merge when CI is green)
+      - title: Deploy PR (merged automatically)
         url: ${{ steps.pr.output.remoteUrl }}
       - title: Open in catalog
         icon: catalog
