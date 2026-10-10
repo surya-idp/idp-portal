@@ -164,6 +164,8 @@ spec:
         deployRepoUrl: github.com?owner=surya-idp&repo=idp-gitops
         pullRequestNumber: ${{ steps.pr.output.pullRequestNumber }}
         token: ${{ secrets.USER_OAUTH_TOKEN }}
+        mergeMethod: SQUASH
+        timeoutMinutes: 15
 
   output:
     links:

@@ -67,8 +67,12 @@ export const idpScaffolderModule = createBackendModule({
                     })
                     .optional(),
                 mergeMethod: z =>
-                  z.enum(['MERGE', 'SQUASH', 'REBASE']).default('SQUASH'),
-                timeoutMinutes: z => z.number().default(15),
+                  z
+                    .enum(['MERGE', 'SQUASH', 'REBASE'])
+                    .describe('Default: SQUASH')
+                    .optional(),
+                timeoutMinutes: z =>
+                  z.number().describe('Default: 15').optional(),
               },
               output: {
                 ciRunUrl: z => z.string(),
@@ -119,8 +123,11 @@ export const idpScaffolderModule = createBackendModule({
                 commitSha: ctx.input.commitSha,
                 deployRepo: { owner: deploy.owner, repo: deploy.repo },
                 pullRequestNumber: ctx.input.pullRequestNumber,
-                mergeMethod: ctx.input.mergeMethod,
-                timeoutMs: ctx.input.timeoutMinutes * 60_000,
+                // Defaults are applied here: the scaffolder validates the input against the
+                // schema but does not fill in schema defaults (first live run, 2026-10-10:
+                // an undefined merge method reached GitHub).
+                mergeMethod: ctx.input.mergeMethod ?? 'SQUASH',
+                timeoutMs: (ctx.input.timeoutMinutes ?? 15) * 60_000,
                 pollIntervalMs: 10_000,
                 log: message => ctx.logger.info(message),
               });
