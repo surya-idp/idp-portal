@@ -9,7 +9,26 @@ metadata:
     github.com/project-slug: surya-idp/template-ci
     backstage.io/source-template: template:default/python-service
     idp.surya-idp/template-version: "2"
+    idp.surya-idp/gitops-path: apps/template-ci
+    idp.surya-idp/ecr-repository: svc/template-ci
 spec:
   type: service
+  lifecycle: experimental
+  owner: user:default/guest
+---
+# A service from a DIFFERENT (imaginary) golden-path template that deploys nothing and builds
+# no image: it records only its repository. Template CI uses it to prove that
+# decommission-service is not tied to python-service: the steps without an annotation are skipped.
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: template-ci-library
+  description: Stand-in for a service from another template, with no deployment and no image
+  annotations:
+    github.com/project-slug: surya-idp/template-ci-library
+    backstage.io/source-template: template:default/some-future-template
+    idp.surya-idp/template-version: "1"
+spec:
+  type: library
   lifecycle: experimental
   owner: user:default/guest

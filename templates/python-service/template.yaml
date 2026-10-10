@@ -93,6 +93,11 @@ spec:
               github.com/project-slug: surya-idp/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
               backstage.io/kubernetes-id: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
               backstage.io/techdocs-ref: dir:.
+              # What this template created outside the repo. Day-2 templates read these
+              # instead of guessing from the name: decommission-service removes exactly what
+              # is listed here, so it works for any template (templates/README.md).
+              idp.surya-idp/gitops-path: apps/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
+              idp.surya-idp/ecr-repository: svc/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
               # The platform-wide marker of a golden-path service: day-2 templates such as
               # decommission-service list services by it. Every golden-path template must
               # write it. Bump when the skeleton changes in a way existing services should adopt.

@@ -85,13 +85,13 @@ describe('listFiles', () => {
 });
 
 describe('deleteEcrRepository', () => {
-  it('deletes svc/<name> and nothing else', async () => {
+  it('deletes the named svc/ repository', async () => {
     const deleted: string[] = [];
     const ecr = {
       deleteRepository: async (name: string) => void deleted.push(name),
     };
     await expect(
-      deleteEcrRepository({ ecr, serviceName: 'demo-svc', log }),
+      deleteEcrRepository({ ecr, repositoryName: 'svc/demo-svc', log }),
     ).resolves.toBe(true);
     expect(deleted).toEqual(['svc/demo-svc']);
   });
@@ -105,7 +105,7 @@ describe('deleteEcrRepository', () => {
       },
     };
     await expect(
-      deleteEcrRepository({ ecr, serviceName: 'demo-svc', log }),
+      deleteEcrRepository({ ecr, repositoryName: 'svc/demo-svc', log }),
     ).resolves.toBe(false);
   });
 
@@ -118,22 +118,28 @@ describe('deleteEcrRepository', () => {
       },
     };
     await expect(
-      deleteEcrRepository({ ecr, serviceName: 'demo-svc', log }),
+      deleteEcrRepository({ ecr, repositoryName: 'svc/demo-svc', log }),
     ).rejects.toThrow(
       /Could not delete ECR repository svc\/demo-svc: not allowed/,
     );
   });
 
-  it.each(['', '../idp-portal', 'svc/x', 'Demo', 'a b'])(
-    'refuses the name "%s"',
-    async serviceName => {
-      const ecr = { deleteRepository: jest.fn() };
-      await expect(
-        deleteEcrRepository({ ecr, serviceName, log }),
-      ).rejects.toThrow(/not a valid service name/);
-      expect(ecr.deleteRepository).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    '',
+    'demo-svc',
+    'idp-portal',
+    'feature-flag-service',
+    'svc/',
+    'svc/../idp-portal',
+    'svc/a/b',
+    'SVC/demo',
+  ])('refuses the repository "%s"', async repositoryName => {
+    const ecr = { deleteRepository: jest.fn() };
+    await expect(
+      deleteEcrRepository({ ecr, repositoryName, log }),
+    ).rejects.toThrow(/only a repository svc\/<name> is allowed/);
+    expect(ecr.deleteRepository).not.toHaveBeenCalled();
+  });
 });
 
 describe('archiveRepository', () => {

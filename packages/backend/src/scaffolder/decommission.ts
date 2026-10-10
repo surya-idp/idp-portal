@@ -2,8 +2,10 @@
  * Logic behind the scaffolder actions that the decommission-service template uses, kept free
  * of Backstage, Octokit and AWS SDK types so it can be unit tested with fakes.
  *
- * Removing a service touches four places. Each function below handles one of them and is
- * safe to run twice (a half-finished decommission can simply be started again):
+ * Removing a service touches several places. Which ones is not assumed here: the template
+ * reads it from annotations that the service's own template wrote at creation time, so one
+ * decommission template serves every golden-path template. Each function below handles one
+ * kind of resource and is safe to run twice (a half-finished run can be started again):
  *   listFiles           -> which files a PR must delete from the deploy repo
  *   deleteEcrRepository -> the service's images
  *   archiveRepository   -> the source repo (archived, not deleted: it can be restored)
@@ -55,18 +57,20 @@ export interface EcrApi {
   deleteRepository(repositoryName: string): Promise<void>;
 }
 
-/** Deletes ECR svc/<name>. Returns false when it did not exist (already removed). */
+/** Deletes an ECR repository under svc/. Returns false when it did not exist. */
 export async function deleteEcrRepository(options: {
   ecr: EcrApi;
-  serviceName: string;
+  repositoryName: string;
   log: (message: string) => void;
 }): Promise<boolean> {
-  const { ecr, serviceName, log } = options;
-  if (!/^[a-z][a-z0-9-]*[a-z0-9]$/.test(serviceName)) {
-    throw new Error(`"${serviceName}" is not a valid service name`);
+  const { ecr, repositoryName, log } = options;
+  // Golden-path images live under svc/. The name comes from a catalog annotation, so it is
+  // checked here as well as by the pod's IAM role, which allows nothing outside svc/ either.
+  if (!/^svc\/[a-z][a-z0-9-]*[a-z0-9]$/.test(repositoryName)) {
+    throw new Error(
+      `Refusing to delete "${repositoryName}": only a repository svc/<name> is allowed`,
+    );
   }
-  // Template services live under svc/; the pod's IAM role allows nothing else either.
-  const repositoryName = `svc/${serviceName}`;
   try {
     await ecr.deleteRepository(repositoryName);
     log(`Deleted ECR repository ${repositoryName} and its images`);

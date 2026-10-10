@@ -92,13 +92,43 @@ if [ -n "$extra" ]; then
   echo "decommission-service left files in the workspace; its PR would ADD them:"; echo "$extra"; exit 1
 fi
 
+
+echo
+echo "    decommission-service on a service from another template (no deployment, no image)"
+for _ in $(seq 1 30); do
+  curl -sf -H "Authorization: Bearer $TEMPLATE_CI_TOKEN" -o /dev/null \
+    "$BACKSTAGE_URL/api/catalog/entities/by-name/component/default/template-ci-library" && break
+  sleep 2
+done
+python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1])); d['values']['entity']='component:default/template-ci-library'
+json.dump(d,open(sys.argv[2],'w'))" "$DECOM/test-values.json" "$WORK/other-values.json"
+node scripts/template-dry-run.mjs "$DECOM" "$WORK/other-values.json" "$WORK/decommission-other" | tee "$WORK/other.log"
+# One removal template for every creation template: what a service did not record is skipped,
+# and what it did record (here only the repository) is still handled.
+for step in files pr merge ecr; do
+  grep -q "^\[$step\] (skipped) .*condition" "$WORK/other.log" \
+    || { echo "step '$step' was not skipped for a service without that annotation"; exit 1; }
+done
+grep -q '^\[archive\] (skipped) Skipping because .* does not support dry-run' "$WORK/other.log" \
+  || { echo "the archive step should still apply to a service that only has a repository"; exit 1; }
+
 kill -- -"$BACKEND_PID" 2>/dev/null || true
 BACKEND_PID=""
 if grep -rIl '\${{' "$OUT" --exclude-dir=.github; then
   echo "unrendered template expressions in the files above"; exit 1
 fi
-grep -q 'backstage.io/source-template' "$OUT/catalog-info.yaml" \
-  || { echo "catalog-info.yaml has no backstage.io/source-template annotation"; exit 1; }
+# The contract in templates/README.md: day-2 templates find a service's resources through these.
+for annotation in backstage.io/source-template idp.surya-idp/template-version \
+    github.com/project-slug idp.surya-idp/gitops-path idp.surya-idp/ecr-repository; do
+  grep -q "$annotation" "$OUT/catalog-info.yaml" \
+    || { echo "catalog-info.yaml has no $annotation annotation"; exit 1; }
+done
+# ... and they must point at what the template really wrote.
+gitops_path="$(python3 -c "import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))['metadata']['annotations']['idp.surya-idp/gitops-path'])" "$OUT/catalog-info.yaml")"
+[ -d "$OUT/env-config-change/$gitops_path" ] \
+  || { echo "annotation gitops-path=$gitops_path, but the template wrote no such folder"; exit 1; }
 
 step "[3/5] The rendered service's own checks (what the shared CI workflow runs)"
 (

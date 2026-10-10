@@ -233,11 +233,11 @@ export const idpScaffolderModule = createBackendModule({
           createTemplateAction({
             id: 'idp:aws:ecr:delete-repository',
             description:
-              "Deletes the ECR repository svc/<serviceName> with its images. Uses the pod's IAM role, which may only delete under svc/.",
+              "Deletes an ECR repository under svc/ with its images. Uses the pod's IAM role, which may only delete under svc/.",
             schema: {
               input: {
-                serviceName: z =>
-                  z.string({ description: 'The service name (without svc/)' }),
+                repositoryName: z =>
+                  z.string({ description: 'The repository, as svc/<name>' }),
               },
               output: {
                 deleted: z => z.boolean(),
@@ -258,7 +258,7 @@ export const idpScaffolderModule = createBackendModule({
                     );
                   },
                 },
-                serviceName: ctx.input.serviceName,
+                repositoryName: ctx.input.repositoryName,
                 log: message => ctx.logger.info(message),
               });
               ctx.output('deleted', deleted);
@@ -271,9 +271,10 @@ export const idpScaffolderModule = createBackendModule({
               'Archives a repository (read-only, restorable) as the GitHub App.',
             schema: {
               input: {
-                repoUrl: z =>
+                projectSlug: z =>
                   z.string({
-                    description: 'github.com?owner=<owner>&repo=<name>',
+                    description:
+                      'The repository as <owner>/<name>, the value of the catalog annotation github.com/project-slug',
                   }),
               },
               output: {
@@ -281,10 +282,19 @@ export const idpScaffolderModule = createBackendModule({
               },
             },
             async handler(ctx) {
-              const repo = parseRepoUrl(ctx.input.repoUrl, integrations);
-              if (!repo.owner) {
-                throw new InputError('repoUrl needs an owner');
+              const match = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/.exec(
+                ctx.input.projectSlug,
+              );
+              if (!match) {
+                throw new InputError(
+                  `"${ctx.input.projectSlug}" is not an <owner>/<name> repository`,
+                );
               }
+              const repo = {
+                host: 'github.com',
+                owner: match[1],
+                repo: match[2],
+              };
               const archived = await archiveRepository({
                 api: await githubClient(repo, ctx.logger),
                 repo: { owner: repo.owner, repo: repo.repo },

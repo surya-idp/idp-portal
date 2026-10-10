@@ -1,14 +1,23 @@
-# idp day-2 template: remove a service that was created from a golden-path template.
+# idp day-2 template: remove a service that was created from ANY golden-path template.
 #
-# Creating a service touches four places, so removing one must too. Doing it by hand means four
-# tools and four chances to forget one (an abandoned service keeps 2 pods running on small nodes).
+# One removal template for all creation templates. It does not know what python-service (or a
+# future Go or Node template) creates. It reads that from the service's own catalog entry,
+# where the creating template recorded it as annotations (the contract is in ../README.md):
 #
-#   1. catalog:fetch                   -> the chosen service's catalog entry (name, repo)
-#   2. idp:github:list-files           -> every file under apps/<name> in idp-gitops
+#   idp.surya-idp/template-version  marks a golden-path service; only these can be picked
+#   idp.surya-idp/gitops-path       folder in idp-gitops holding its deploy files
+#   idp.surya-idp/ecr-repository    its image repository in ECR
+#   github.com/project-slug         its source repository
+#
+# A step runs only when its annotation is present, so a template that creates no image
+# repository simply does not write that annotation, and nothing here needs to change.
+#
+#   1. catalog:fetch                   -> the chosen service's catalog entry
+#   2. idp:github:list-files           -> every file under its gitops-path
 #   3. publish:github:pull-request     -> PR in idp-gitops deleting those files (the audit record)
 #   4. idp:github:await-ci-auto-merge  -> merges it when `validate` is green; Argo CD then removes
 #                                         the Application, pods, Service and the ALB route
-#   5. idp:aws:ecr:delete-repository   -> ECR svc/<name> and its images
+#   5. idp:aws:ecr:delete-repository   -> its ecr-repository and the images in it
 #   6. idp:github:archive-repo         -> the source repo becomes read-only (restorable)
 #   7. idp:catalog:unregister          -> the service leaves the catalog
 #
@@ -43,10 +52,8 @@ spec:
           ui:options:
             # Keyed on the platform-wide marker, not on one template's name: every golden-path
             # template writes idp.surya-idp/template-version, so services from a future
-            # template (Go, Node ...) appear here with no change. The marker is also a promise
-            # about layout: deploy files in idp-gitops apps/<name>, images in ECR svc/<name>,
-            # repo surya-idp/<name>. A template that sets it must follow that layout.
-            # The platform's own components do not have it and cannot be picked.
+            # template (Go, Node ...) appear here with no change. The platform's own
+            # components do not have it and cannot be picked.
             catalogFilter:
               kind: Component
               metadata.annotations.idp.surya-idp/template-version:
@@ -67,20 +74,22 @@ spec:
 
     - id: files
       name: Find the deploy files
+      if: ${{ steps.entity.output.entity.metadata.annotations['idp.surya-idp/gitops-path'] }}
       action: idp:github:list-files
       input:
         repoUrl: github.com?owner=surya-idp&repo=idp-gitops
-        directory: apps/${{ steps.entity.output.entity.metadata.name }}
+        directory: ${{ steps.entity.output.entity.metadata.annotations['idp.surya-idp/gitops-path'] }}
 
     - id: pr
       name: Open removal PR in idp-gitops
+      if: ${{ steps.entity.output.entity.metadata.annotations['idp.surya-idp/gitops-path'] }}
       action: publish:github:pull-request
       input:
         repoUrl: github.com?owner=surya-idp&repo=idp-gitops
         branchName: remove-${{ steps.entity.output.entity.metadata.name }}
         title: "Remove ${{ steps.entity.output.entity.metadata.name }} (decommission)"
         description: |
-          Removes `${{ steps.entity.output.entity.metadata.name }}` from the dev cluster: deleting `apps/${{ steps.entity.output.entity.metadata.name }}`
+          Removes `${{ steps.entity.output.entity.metadata.name }}` from the dev cluster: deleting `${{ steps.entity.output.entity.metadata.annotations['idp.surya-idp/gitops-path'] }}`
           makes the ApplicationSet delete its Argo CD Application, and with it the pods, the Service
           and the route on the shared ALB.
 
@@ -92,6 +101,7 @@ spec:
 
     - id: merge
       name: Merge the removal PR
+      if: ${{ steps.entity.output.entity.metadata.annotations['idp.surya-idp/gitops-path'] }}
       action: idp:github:await-ci-auto-merge
       input:
         deployRepoUrl: github.com?owner=surya-idp&repo=idp-gitops
@@ -101,15 +111,17 @@ spec:
 
     - id: ecr
       name: Delete the images
+      if: ${{ steps.entity.output.entity.metadata.annotations['idp.surya-idp/ecr-repository'] }}
       action: idp:aws:ecr:delete-repository
       input:
-        serviceName: ${{ steps.entity.output.entity.metadata.name }}
+        repositoryName: ${{ steps.entity.output.entity.metadata.annotations['idp.surya-idp/ecr-repository'] }}
 
     - id: archive
       name: Archive the repository
+      if: ${{ steps.entity.output.entity.metadata.annotations['github.com/project-slug'] }}
       action: idp:github:archive-repo
       input:
-        repoUrl: github.com?owner=surya-idp&repo=${{ steps.entity.output.entity.metadata.name }}
+        projectSlug: ${{ steps.entity.output.entity.metadata.annotations['github.com/project-slug'] }}
 
     - id: unregister
       name: Remove from the catalog
@@ -122,4 +134,4 @@ spec:
       - title: Removal PR
         url: ${{ steps.pr.output.remoteUrl }}
       - title: Archived repository
-        url: https://github.com/surya-idp/${{ steps.entity.output.entity.metadata.name }}
+        url: https://github.com/${{ steps.entity.output.entity.metadata.annotations['github.com/project-slug'] }}
