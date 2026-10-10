@@ -15,6 +15,7 @@
 #   ./scripts/test-template.sh
 # Needs: node + yarn install, uv, docker, kubectl, kubeconform, helm, kyverno CLI,
 # python3 + PyYAML, git.
+# RENDER_TO=<folder> keeps a copy of the rendered service.
 # GITOPS_REF picks the idp-gitops branch; default: the branch named like this one if it
 # exists there (paired pull requests), else main.
 set -euo pipefail
@@ -164,6 +165,13 @@ done
 gitops_path="$(python3 -c "import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))['metadata']['annotations']['idp.surya-idp/gitops-path'])" "$OUT/catalog-info.yaml")"
 [ -d "$OUT/env-config-change/$gitops_path" ] \
   || { echo "annotation gitops-path=$gitops_path, but the template wrote no such folder"; exit 1; }
+
+# RENDER_TO=<folder>: keep a copy of the rendered service, to look at it or to work on the
+# skeleton (run its checks there, then carry the fix back into the template).
+if [ -n "${RENDER_TO:-}" ]; then
+  rm -rf "$RENDER_TO" && mkdir -p "$RENDER_TO" && cp -r "$OUT/." "$RENDER_TO/"
+  echo "rendered service copied to $RENDER_TO"
+fi
 
 step "[3/5] The rendered service's own checks (what the shared CI workflow runs)"
 (

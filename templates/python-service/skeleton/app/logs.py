@@ -1,7 +1,7 @@
 """JSON logs on stdout, one object per line, with the request id on every line.
 
-Kubernetes collects stdout; a log system (Step 34) can then filter on fields instead of
-parsing text. The request id comes from the X-Request-ID header when the caller sent one,
+Kubernetes collects stdout; the platform's log system (Loki) then filters on fields instead
+of parsing text. The request id comes from the X-Request-ID header when the caller sent one,
 so one request can be followed across services.
 """
 
@@ -10,6 +10,8 @@ import logging
 import sys
 from contextvars import ContextVar
 from datetime import UTC, datetime
+
+from app.tracing import current_trace_id
 
 request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 
@@ -27,6 +29,9 @@ class JsonFormatter(logging.Formatter):
         }
         if (rid := request_id.get()) is not None:
             entry["request_id"] = rid
+        # Links this line to its trace (Grafana turns the id into a link to Tempo).
+        if (tid := current_trace_id()) is not None:
+            entry["trace_id"] = tid
         entry.update({k: v for k, v in record.__dict__.items() if k not in _STANDARD})
         if record.exc_info:
             entry["exception"] = self.formatException(record.exc_info)
