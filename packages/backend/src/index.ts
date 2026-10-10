@@ -7,6 +7,7 @@
  */
 
 import { createBackend } from '@backstage/backend-defaults';
+import { idpScaffolderModule } from './scaffolder/module';
 
 const backend = createBackend();
 
@@ -19,6 +20,8 @@ backend.add(import('@backstage/plugin-scaffolder-backend-module-github'));
 backend.add(
   import('@backstage/plugin-scaffolder-backend-module-notifications'),
 );
+// idp:github:await-ci-auto-merge (zero-touch first deploy)
+backend.add(idpScaffolderModule);
 
 // techdocs plugin
 backend.add(import('@backstage/plugin-techdocs-backend'));
