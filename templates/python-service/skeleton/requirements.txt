@@ -1,5 +1,0 @@
-fastapi==0.141.1
-uvicorn[standard]==0.54.0
-# Explicit: fastapi only requires starlette>=0.46, which still admits versions with
-# HIGH CVEs (CVE-2025-62727 and others). Pin a patched release.
-starlette==1.7.0

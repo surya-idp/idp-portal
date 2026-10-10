@@ -1,0 +1,44 @@
+[project]
+name = "${{ values.name }}"
+version = "0.1.0"
+description = "${{ values.description }}"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "fastapi>=0.141",
+    "pydantic-settings>=2.6",
+    "uvicorn[standard]>=0.54",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.13",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+# An application, not a library: nothing to build or publish, the image copies app/.
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, likely bugs, modern syntax, simplifications
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+strict = true
+files = ["app", "tests"]
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=app --cov-report=term-missing"
+
+[tool.coverage.report]
+# The gate. The shared CI workflow runs pytest, so a drop below this fails the build.
+fail_under = 80

@@ -1,9 +1,13 @@
 # idp golden path: a new Python service, from form to running behind the ALB.
 #
-#   1. render skeleton          -> FastAPI app, Dockerfile, CI, catalog-info.yaml
+#   1. render skeleton          -> FastAPI app (settings, JSON logs, live/ready probes), tests,
+#                                  uv lock file, Dockerfile, docs, a CI file that calls the
+#                                  shared workflow in surya-idp/idp-platform
+#      catalog:write            -> catalog-info.yaml (records which template made the service)
 #   2. publish:github           -> new public repo surya-idp/<name>; its CI builds the image
-#   3. render env-config slice  -> apps/<name>: Deployment/Service/Ingress/HPA/PDB, image pinned
-#                                  to the new repo's first commit. No Argo Application: the
+#   3. render env-config slice  -> apps/<name>: only this service's own values, image pinned to
+#                                  the new repo's first commit. The platform's settings come
+#                                  from idp-gitops components/. No Argo Application: the
 #                                  ApplicationSet in idp-gitops finds apps/<name>/overlays/dev
 #   4. publish:github:pull-request -> PR in idp-gitops (the audit record of the deploy)
 #   5. catalog:register         -> the service shows up in Backstage immediately
@@ -17,7 +21,7 @@ kind: Template
 metadata:
   name: python-service
   title: Python service (FastAPI)
-  description: New FastAPI service with CI to ECR, zero-downtime deploy settings, autoscaling, and a route on the shared ALB.
+  description: New FastAPI service with tests, shared CI to ECR, zero-click deploys, restricted pod security, autoscaling, docs, and a route on the shared ALB.
   tags:
     - python
     - fastapi
@@ -28,7 +32,7 @@ spec:
 
   parameters:
     - title: Service details
-      required: [repoUrl, description]
+      required: [repoUrl, description, owner]
       properties:
         repoUrl:
           title: Name
@@ -51,7 +55,11 @@ spec:
         owner:
           title: Owner
           type: string
-          default: DSurya11
+          description: The user or group responsible for the service.
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: [Group, User]
 
   steps:
     - id: skeleton
@@ -64,7 +72,34 @@ spec:
         values:
           name: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
           description: ${{ parameters.description }}
-          owner: ${{ parameters.owner }}
+
+    # Written by the scaffolder instead of copied from the skeleton: catalog:write adds the
+    # backstage.io/source-template annotation, so every service made from this template can
+    # be listed later (for example to roll out a change to all of them).
+    - id: catalog
+      name: Write catalog entry
+      action: catalog:write
+      input:
+        entity:
+          apiVersion: backstage.io/v1alpha1
+          kind: Component
+          metadata:
+            name: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
+            description: ${{ parameters.description }}
+            annotations:
+              github.com/project-slug: surya-idp/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
+              backstage.io/kubernetes-id: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
+              backstage.io/techdocs-ref: dir:.
+              # Bump when the skeleton changes in a way existing services should adopt.
+              idp.surya-idp/template-version: "2"
+            tags:
+              - python
+              - fastapi
+              - golden-path
+          spec:
+            type: service
+            lifecycle: experimental
+            owner: ${{ parameters.owner }}
 
     - id: publish
       name: Create GitHub repository
@@ -95,8 +130,9 @@ spec:
         branchName: add-${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
         title: "Deploy ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }} (golden path)"
         description: |
-          Adds `${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}` to the dev cluster: Deployment,
+          Adds `${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}` to the dev cluster: ServiceAccount, Deployment,
           Service, Ingress (shared ALB, path `/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}`), HPA and PDB.
+          Only the service's own values are in this PR; the platform's settings come from `components/`.
 
           Image: `svc/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}:${{ steps.publish.output.commitHash }}`, built by
           ${{ steps.publish.output.remoteUrl }}/actions.

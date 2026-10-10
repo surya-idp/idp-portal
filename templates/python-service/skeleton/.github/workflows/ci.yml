@@ -1,5 +1,8 @@
-# Golden-path CI. Copied WITHOUT templating: GitHub's ${{ }} syntax would clash with the
-# scaffolder's, so the service name comes from the repository name at run time.
+# The pipeline itself lives in surya-idp/idp-platform (one place for every service):
+# lint, format check, type check, tests + coverage gate, arm64 image, Trivy, push to ECR on main.
+# It is pinned to a commit; Dependabot opens the PR when a new version is released.
+#
+# Copied WITHOUT templating: GitHub's ${{ }} syntax would clash with the scaffolder's.
 name: CI
 
 on:
@@ -11,55 +14,11 @@ concurrency:
   group: ci-${{ github.sha }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
-  build:
-    runs-on: ubuntu-24.04-arm         # native arm64 = the EKS nodes' architecture
+  ci:
+    uses: surya-idp/idp-platform/.github/workflows/python-service.yml@8f097a3c1aba497df996903f7819edfc14de0393 # v1.0.0
     permissions:
       contents: read
-      id-token: write                 # OIDC to AWS, no stored credentials
-    env:
-      REGISTRY: 693906847772.dkr.ecr.ap-south-1.amazonaws.com
-      REPO: svc/${{ github.event.repository.name }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - name: Build image
-        run: docker build --build-arg GIT_SHA=${GITHUB_SHA} -t "${REGISTRY}/${REPO}:${GITHUB_SHA}" .
-
-      - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.REPO }}:${{ github.sha }}
-          format: table
-          exit-code: '1'
-          ignore-unfixed: true
-          vuln-type: os,library
-          severity: HIGH,CRITICAL
-
-      - name: Configure AWS credentials via OIDC
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
-        with:
-          # Narrow role: can only create/push ECR repos under svc/*
-          role-to-assume: arn:aws:iam::693906847772:role/idp-service-ci
-          aws-region: ap-south-1
-
-      - name: Login to Amazon ECR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
-
-      - name: Ensure ECR repository exists
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          if ! aws ecr describe-repositories --repository-names "$REPO" >/dev/null 2>&1; then
-            aws ecr create-repository --repository-name "$REPO" \
-              --image-tag-mutability IMMUTABLE \
-              --image-scanning-configuration scanOnPush=true \
-              --tags Key=Project,Value=idp Key=ManagedBy,Value=golden-path-ci
-            aws ecr put-lifecycle-policy --repository-name "$REPO" --lifecycle-policy-text \
-              '{"rules":[{"rulePriority":1,"description":"keep last 10","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}'
-          fi
-
-      - name: Push image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: docker push "${REGISTRY}/${REPO}:${GITHUB_SHA}"
+      id-token: write   # OIDC to AWS for the ECR push, no stored credentials

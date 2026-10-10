@@ -3,9 +3,7 @@ kind: Service
 metadata:
   name: ${{ values.name }}
 spec:
-  selector:
-    app: ${{ values.name }}
   ports:
     - name: http
       port: 8000
-      targetPort: 8000
+      targetPort: http

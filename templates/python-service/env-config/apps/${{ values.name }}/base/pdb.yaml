@@ -2,10 +2,6 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: ${{ values.name }}
-  annotations:
-    argocd.argoproj.io/sync-wave: "3"
 spec:
-  minAvailable: 1
   selector:
-    matchLabels:
-      app: ${{ values.name }}
+    matchLabels: {}   # filled in by `labels` in kustomization.yaml
