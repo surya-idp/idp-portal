@@ -20,7 +20,7 @@ TEMPLATE=templates/python-service
 SERVICE=template-ci                      # repo name in $TEMPLATE/test-values.json
 WORK="$(mktemp -d)"
 export TEMPLATE_CI_TOKEN="${TEMPLATE_CI_TOKEN:-$(head -c 24 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9')}"
-export BACKSTAGE_URL="${BACKSTAGE_URL:-http://localhost:7007}"
+export BACKSTAGE_URL="${BACKSTAGE_URL:-http://localhost:7107}"
 BACKEND_PID=""
 
 cleanup() {

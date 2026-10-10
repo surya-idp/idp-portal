@@ -1,7 +1,8 @@
 [project]
 name = "${{ values.name }}"
 version = "0.1.0"
-description = "${{ values.description }}"
+# `dump` writes the text as a quoted, escaped string, so quotes in it cannot break this file.
+description = ${{ values.description | dump }}
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "fastapi>=0.141",

@@ -1,4 +1,4 @@
-"""${{ values.name }} - ${{ values.description }}
+"""${{ values.name }}: a service on the idp platform.
 
 Created from the idp "python-service" golden path.
 

@@ -71,7 +71,10 @@ spec:
           - .github/workflows/*
         values:
           name: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
-          description: ${{ parameters.description }}
+          # The description is free text typed by a person. It goes only into prose and into
+          # quoted strings (pyproject.toml, mkdocs.yml: `| dump`), never into code that a
+          # linter or formatter checks: a trailing space once failed the first CI run.
+          description: ${{ parameters.description | trim }}
 
     # Written by the scaffolder instead of copied from the skeleton: catalog:write adds the
     # backstage.io/source-template annotation, so every service made from this template can
@@ -85,7 +88,7 @@ spec:
           kind: Component
           metadata:
             name: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
-            description: ${{ parameters.description }}
+            description: ${{ parameters.description | trim }}
             annotations:
               github.com/project-slug: surya-idp/${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
               backstage.io/kubernetes-id: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
@@ -107,7 +110,7 @@ spec:
       input:
         repoUrl: ${{ parameters.repoUrl }}
         token: ${{ secrets.USER_OAUTH_TOKEN }}
-        description: ${{ parameters.description }}
+        description: ${{ parameters.description | trim }}
         repoVisibility: public
         defaultBranch: main
         protectDefaultBranch: false
