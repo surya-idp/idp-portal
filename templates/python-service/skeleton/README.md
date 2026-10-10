@@ -26,7 +26,7 @@ make run       # http://localhost:8000/${{ values.name }}/docs
 ## How a change reaches the cluster
 
 1. Push to `main` (or merge a PR). CI runs lint, type check and tests, builds the arm64 image,
-   scans it with Trivy, and pushes it to ECR.
+   scans it with Trivy, pushes it to ECR, and attaches signed build provenance and an SBOM.
 2. Argo CD Image Updater sees the new image and commits its tag to `idp-gitops`.
 3. Argo CD rolls it out with zero downtime.
 
@@ -36,3 +36,14 @@ Nobody merges or clicks anything. A red CI run stops at step 1, so a broken buil
 
 Settings are environment variables (`app/config.py`). Set them in
 `idp-gitops/apps/${{ values.name }}/base/deployment.yaml` through a pull request.
+
+## Where did this image come from?
+
+Every image CI pushes carries a signed statement of which workflow built it from which commit,
+and a list of every package inside it. To check one (needs read access to ECR):
+
+```bash
+gh attestation verify oci://693906847772.dkr.ecr.ap-south-1.amazonaws.com/svc/${{ values.name }}@sha256:<digest> \
+  --owner surya-idp \
+  --signer-workflow surya-idp/idp-platform/.github/workflows/python-service.yml
+```
