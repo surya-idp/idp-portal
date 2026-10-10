@@ -6,7 +6,8 @@ Created from the **idp python-service golden path** (Backstage template).
 
 | What | Where |
 |---|---|
-| Code | `app/` (FastAPI): `main.py` routes, `config.py` settings, `health.py` probes, `logs.py` JSON logs |
+| Code | `app/` (FastAPI): `main.py` routes, `config.py` settings, `health.py` probes, `logs.py` JSON logs, `metrics.py` request metrics, `tracing.py` traces |
+| Observability | Grafana dashboard "IDP / Service overview" (rate, errors, latency), logs by `{service="${{ values.name }}"}`, a trace per request |
 | Tests | `tests/` (pytest, coverage gate 80% in `pyproject.toml`) |
 | Dependencies | `pyproject.toml` + `uv.lock` (change with `uv add <package>`, commit both) |
 | CI | `.github/workflows/ci.yml` calls the shared workflow in `surya-idp/idp-platform` |

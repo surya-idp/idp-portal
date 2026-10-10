@@ -6,6 +6,10 @@ description = ${{ values.description | dump }}
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "fastapi>=0.141",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
+    "opentelemetry-instrumentation-fastapi>=0.51b0",
+    "opentelemetry-sdk>=1.30",
+    "prometheus-client>=0.21",
     "pydantic-settings>=2.6",
     "uvicorn[standard]>=0.54",
 ]

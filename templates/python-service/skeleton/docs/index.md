@@ -27,4 +27,6 @@ Interactive API documentation is served by the service itself at `/${{ values.na
 - at least 2 replicas spread over zones, autoscaling on CPU, a disruption budget
 - restricted pod security: non-root, read-only root filesystem, no capabilities
 - its own ServiceAccount with no API token mounted
-- JSON logs with a request id on every line
+- JSON logs with a request id and a trace id on every line, collected centrally
+- request metrics scraped by Prometheus, a shared dashboard and four alerts
+- a trace for every request

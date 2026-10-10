@@ -15,14 +15,31 @@ curl -s http://<ALB>/${{ values.name }}/
 | `/health/live` | the process works | Kubernetes restarts the container |
 | `/health/ready` | the service can take traffic | the pod leaves the load balancer, no restart |
 
+## Dashboards, metrics and traces
+
+```bash
+kubectl -n monitoring port-forward svc/kps-grafana 3000:80     # http://localhost:3000, user admin
+kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
+| I want to see | Where in Grafana |
+|---|---|
+| traffic, error share, latency of this service | Dashboards -> "IDP / Service overview" -> Service = `${{ values.name }}` |
+| its logs | Explore -> Loki -> `{service="${{ values.name }}"}`; add `\| json \| status >= 500` to filter on fields |
+| where one slow request spent its time | open a log line, click its `trace_id` -> the trace in Tempo |
+
+The service exposes `/metrics` on the pod (not through the load balancer). Alerts that exist for
+every service: ServiceDown, HighErrorRate (more than 5% 5xx for 5 minutes), HighLatency (p95
+above 500 ms for 5 minutes), PodRestarting. Fired alerts: `kubectl -n monitoring logs deploy/alert-receiver`.
+
 ## Logs
 
 ```bash
 kubectl -n ${{ values.name }} logs deploy/${{ values.name }} --tail=100
 ```
 
-One JSON object per line. Every request line has `request_id`, `method`, `path`, `status`
-and `duration_ms`. To follow one request, filter on its `request_id` (the value of the
+One JSON object per line. Every request line has `request_id`, `trace_id`, `method`, `path`,
+`status` and `duration_ms`. To follow one request, filter on its `request_id` (the value of the
 `X-Request-ID` response header).
 
 ## A deploy did not happen
