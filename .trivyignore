@@ -1,0 +1,12 @@
+# Findings accepted for a limited time, each with the reason and an expiry date. After the
+# date Trivy reports the finding again and CI fails, so the decision is reviewed, not forgotten.
+#
+# Both come from mockttp, an HTTP mocking library that @backstage/backend-openapi-utils lists as
+# a runtime dependency but only uses in its test helpers. The backend never starts it, and the
+# fixed versions are new majors that mockttp 3.x does not accept (no in-range update exists).
+# Remove these lines when a Backstage release drops or updates mockttp.
+
+# @graphql-tools/utils 8.x: DoS via prototype pollution in mergeDeep (fixed in 12.0.1)
+CVE-2026-104852 exp:2026-12-10
+# basic-ftp 5.x: DoS via crafted directory listing (fixed in 6.2.1); via mockttp -> pac-proxy-agent
+CVE-2026-102990 exp:2026-12-10
