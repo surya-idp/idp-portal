@@ -12,7 +12,7 @@ STAND_IN=golden-path-service
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-sed -e "s/\${{ values.name }}/$STAND_IN/g" -e 's/\${{ values.description }}/placeholder/g' \
+sed -e "s/\${{ values.name }}/$STAND_IN/g" -e 's/\${{ values.description | dump }}/"placeholder"/g' \
   pyproject.toml > "$work/pyproject.toml"
 (cd "$work" && uv lock)
 sed "s/^name = \"$STAND_IN\"$/name = \"\${{ values.name }}\"/" "$work/uv.lock" > uv.lock

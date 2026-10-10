@@ -3,6 +3,10 @@
 # Nothing here is a real credential, and a dry run never calls GitHub. Kept out of the repo
 # root on purpose: the image build copies app-config*.yaml from there.
 backend:
+  # Not 7007: a developer may have Backstage (or a port-forward to it) on that port.
+  baseUrl: http://localhost:7107
+  listen:
+    port: 7107
   database:
     client: better-sqlite3
     connection: ':memory:'

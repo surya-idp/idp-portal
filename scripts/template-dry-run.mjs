@@ -5,7 +5,7 @@
  *
  *   node scripts/template-dry-run.mjs <template dir> <values.json> <output dir>
  *
- * Environment: BACKSTAGE_URL (default http://localhost:7007), TEMPLATE_CI_TOKEN (the static
+ * Environment: BACKSTAGE_URL (default http://localhost:7107), TEMPLATE_CI_TOKEN (the static
  * token from scripts/template-ci.app-config.yaml), DRY_RUN_VERBOSE=1 for the full scaffolder log.
  *
  * Outputs of skipped steps are the scaffolder's placeholder "<example>" (for instance the
@@ -27,7 +27,7 @@ if (!templateDir || !valuesFile || !outDir) {
   );
   process.exit(2);
 }
-const baseUrl = process.env.BACKSTAGE_URL ?? 'http://localhost:7007';
+const baseUrl = process.env.BACKSTAGE_URL ?? 'http://localhost:7107';
 const token = process.env.TEMPLATE_CI_TOKEN;
 
 function* walk(dir) {

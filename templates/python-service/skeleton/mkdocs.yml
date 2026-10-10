@@ -1,5 +1,5 @@
 site_name: ${{ values.name }}
-site_description: ${{ values.description }}
+site_description: ${{ values.description | dump }}
 nav:
   - Overview: index.md
   - Runbook: runbook.md
