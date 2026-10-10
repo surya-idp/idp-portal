@@ -15,6 +15,10 @@ resources:
 components:
   - ../../../components/golden-path
   - ../../../components/public-route
+{%- if values.postgres %}
+  # Own database and login; DATABASE_URL and DATABASE_* arrive as environment variables.
+  - ../../../components/postgres
+{%- endif %}
 labels:
   # On every resource, pod template and selector.
   - pairs:

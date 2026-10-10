@@ -16,11 +16,19 @@ backend:
   # config options: https://node-postgres.com/apis/client
   database:
     client: pg
+    # One database, one schema per plugin. The default (one DATABASE per plugin) needs the
+    # CREATEDB right, which only the RDS master user had. Backstage now has a login of its own
+    # that owns exactly the database `backstage` (idp-gitops apps/idp-portal/base/database.yaml,
+    # PLATFORM_REVIEW F3), so it creates schemas there and never databases.
+    pluginDivisionMode: schema
+    ensureExists: false
+    ensureSchemaExists: true
     connection:
       host: ${POSTGRES_HOST}
       port: ${POSTGRES_PORT}
       user: ${POSTGRES_USER}
       password: ${POSTGRES_PASSWORD}
+      database: ${POSTGRES_DB}
       # RDS PostgreSQL 16 enforces SSL (rds.force_ssl=1). Node's pg driver does not
       # negotiate it by default, so connect with TLS verified against AWS's public RDS CA.
       ssl:
