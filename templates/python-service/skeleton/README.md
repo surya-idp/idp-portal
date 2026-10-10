@@ -23,6 +23,16 @@ make check     # lint, format check, types, tests: exactly what CI runs
 make run       # http://localhost:8000/${{ values.name }}/docs
 ```
 
+## A database
+
+If the service was created with "Needs a PostgreSQL database", or after running the
+"Add a PostgreSQL database" template in Backstage, the container has `DATABASE_URL` and
+`DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`. The
+login owns the database, so the service creates its own tables. To use it: add a driver
+(`uv add "psycopg[binary]"`), add a field `database_url: str | None = None` to `app/config.py`,
+and register a readiness check in `app/health.py` so the pod only takes traffic when the
+database answers.
+
 ## How a change reaches the cluster
 
 1. Push to `main` (or merge a PR). CI runs lint, type check and tests, builds the arm64 image,
