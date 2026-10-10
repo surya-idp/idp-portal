@@ -68,6 +68,39 @@ OUT="$WORK/$SERVICE"
 node scripts/template-dry-run.mjs "$TEMPLATE" "$TEMPLATE/test-values.json" "$OUT"
 
 echo
+echo "    python-service with the database option"
+node scripts/template-dry-run.mjs "$TEMPLATE" "$TEMPLATE/test-values-postgres.json" "$WORK/$SERVICE-postgres"
+grep -q 'components/postgres' "$WORK/$SERVICE-postgres/env-config-change/apps/$SERVICE/base/kustomization.yaml" \
+  || { echo "postgres: true did not add the postgres component"; exit 1; }
+if grep -q 'components/postgres' "$OUT/env-config-change/apps/$SERVICE/base/kustomization.yaml"; then
+  echo "the postgres component was added although the option was off"; exit 1
+fi
+
+echo
+echo "    add-postgres-database (dry run against the stand-in catalog entry)"
+ADDPG=templates/add-postgres-database
+python3 - "$ADDPG/template.yaml" "$actions" <<'PY'
+import json, sys, yaml
+template = yaml.safe_load(open(sys.argv[1]))
+installed = {a["id"] for a in json.load(open(sys.argv[2]))}
+missing = [s["action"] for s in template["spec"]["steps"] if s["action"] not in installed]
+if missing:
+    sys.exit(f"{sys.argv[1]} uses actions this backend does not have: {missing}")
+PY
+for _ in $(seq 1 30); do
+  curl -sf -H "Authorization: Bearer $TEMPLATE_CI_TOKEN" -o /dev/null \
+    "$BACKSTAGE_URL/api/catalog/entities/by-name/component/default/template-ci" && break
+  sleep 2
+done
+node scripts/template-dry-run.mjs "$ADDPG" "$ADDPG/test-values.json" "$WORK/add-postgres"
+# The pull request must change exactly one file: the service's base kustomization.
+changed="$(cd "$WORK/add-postgres" && find . -type f ! -name .dry-run-output.json | sort)"
+[ "$changed" = "./apps/template-ci/base/kustomization.yaml" ] \
+  || { echo "add-postgres-database should change only the base kustomization, got:"; echo "$changed"; exit 1; }
+grep -q 'components/postgres' "$WORK/add-postgres/apps/template-ci/base/kustomization.yaml" \
+  || { echo "the postgres component was not added"; exit 1; }
+
+echo
 echo "    decommission-service (dry run against the stand-in catalog entry)"
 DECOM=templates/decommission-service
 python3 - "$DECOM/template.yaml" "$actions" <<'PY'
@@ -160,9 +193,14 @@ fi
 echo "idp-gitops ref: $GITOPS_REF"
 git clone --quiet --depth 1 --branch "$GITOPS_REF" "$GITOPS_URL" "$WORK/idp-gitops"
 cp -r "$OUT/env-config-change/." "$WORK/idp-gitops/"
+# The variant with a database is validated too, under its own name.
+mkdir -p "$WORK/idp-gitops/apps/$SERVICE-pg"
+cp -r "$WORK/$SERVICE-postgres/env-config-change/apps/$SERVICE/." "$WORK/idp-gitops/apps/$SERVICE-pg/"
+grep -rl "$SERVICE" "$WORK/idp-gitops/apps/$SERVICE-pg" | xargs sed -i "s/$SERVICE/$SERVICE-pg/g"
 "$WORK/idp-gitops/scripts/validate.sh" | grep -A2 "apps/$SERVICE/"
 # validate.sh's exit code, not grep's
 [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "idp-gitops validate.sh failed"; exit 1; }
 
 echo
-echo "Templates OK: python-service rendered, checked, built and validated; decommission-service dry run clean."
+echo "Templates OK: python-service (with and without a database) rendered, checked, built and validated;"
+echo "              add-postgres-database and decommission-service dry runs clean."

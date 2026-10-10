@@ -1,0 +1,11 @@
+{
+  "values": {
+    "repoUrl": "github.com?owner=surya-idp&repo=template-ci",
+    "description": " He said \"hello\": it's a 100% test, with a \\ backslash, #1 & <tags>, and longer than one hundred characters in all ",
+    "owner": "user:default/dsurya11",
+    "postgres": true
+  },
+  "secrets": {
+    "USER_OAUTH_TOKEN": "not-a-real-token"
+  }
+}

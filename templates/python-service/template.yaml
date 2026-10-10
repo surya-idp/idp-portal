@@ -52,6 +52,14 @@ spec:
           title: Description
           type: string
           maxLength: 120
+        postgres:
+          title: Needs a PostgreSQL database
+          type: boolean
+          default: false
+          description: >-
+            Gives the service its own database and login on the shared instance, as
+            DATABASE_URL and DATABASE_* environment variables. Can also be added later with
+            the "Add a PostgreSQL database" template.
         owner:
           title: Owner
           type: string
@@ -131,6 +139,7 @@ spec:
         values:
           name: ${{ parameters.repoUrl | parseRepoUrl | pick('repo') }}
           commitHash: ${{ steps.publish.output.commitHash }}
+          postgres: ${{ parameters.postgres }}
 
     - id: pr
       name: Open deploy PR in env-config

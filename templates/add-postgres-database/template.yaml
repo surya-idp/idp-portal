@@ -1,0 +1,108 @@
+# idp day-2 template: give an existing golden-path service a PostgreSQL database of its own.
+#
+# Works for services from ANY golden-path template: it reads where the service's deploy files
+# live from the catalog annotation idp.surya-idp/gitops-path (contract: ../README.md).
+#
+#   1. catalog:fetch                   -> the chosen service's catalog entry
+#   2. idp:gitops:add-component        -> adds one line, the `postgres` component, to the
+#                                         service's base kustomization.yaml
+#   3. publish:github:pull-request     -> PR in idp-gitops with that one-line change
+#   4. idp:github:await-ci-auto-merge  -> merges it when `validate` is green
+#
+# What happens in the cluster after the merge (idp-gitops components/postgres):
+#   - the database operator creates a database named like the service and a role that owns it
+#   - it writes the Secret `database-credentials` into the service's namespace
+#   - the service's pods restart with DATABASE_URL, DATABASE_HOST, DATABASE_PORT,
+#     DATABASE_NAME, DATABASE_USER and DATABASE_PASSWORD in their environment
+#
+# The template does not touch the service's code: connecting and creating tables is the
+# service's own work (it owns the database, so it can run migrations).
+#
+# Removing the service later (decommission-service) deletes these resources with the rest of
+# its folder, and the operator drops the database and the role. No extra removal step.
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: add-postgres-database
+  title: Add a PostgreSQL database
+  description: Gives an existing golden-path service its own database and login on the shared instance, delivered as environment variables.
+  tags:
+    - day-2
+    - golden-path
+    - postgres
+spec:
+  owner: DSurya11
+  type: service
+
+  parameters:
+    - title: Which service
+      required: [entity]
+      properties:
+        entity:
+          title: Service
+          type: string
+          description: Golden-path services that have a deployment.
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: Component
+              metadata.annotations.idp.surya-idp/gitops-path:
+                exists: true
+            defaultKind: Component
+
+  steps:
+    - id: entity
+      name: Read the catalog entry
+      action: catalog:fetch
+      input:
+        entityRef: ${{ parameters.entity }}
+
+    - id: component
+      name: Add the postgres component
+      action: idp:gitops:add-component
+      input:
+        repoUrl: github.com?owner=surya-idp&repo=idp-gitops
+        directory: ${{ steps.entity.output.entity.metadata.annotations['idp.surya-idp/gitops-path'] }}
+        component: postgres
+
+    # Skipped when the service already has a database: there is nothing to change.
+    - id: pr
+      name: Open PR in idp-gitops
+      if: ${{ steps.component.output.changed }}
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?owner=surya-idp&repo=idp-gitops
+        branchName: add-postgres-${{ steps.entity.output.entity.metadata.name }}
+        title: "Add a PostgreSQL database to ${{ steps.entity.output.entity.metadata.name }}"
+        description: |
+          Adds the `postgres` component to `${{ steps.entity.output.entity.metadata.name }}`.
+
+          After the merge the database operator creates a database and a login for this service
+          and writes the Secret `database-credentials` into its namespace. The pods restart with
+          `DATABASE_URL` and `DATABASE_*` in their environment.
+
+          Nobody needs to merge this: Backstage merges it when the `validate` check passes.
+
+          Requested by `${{ user.ref }}` through the Backstage add-postgres-database template.
+
+    - id: merge
+      name: Merge the PR
+      if: ${{ steps.component.output.changed }}
+      action: idp:github:await-ci-auto-merge
+      input:
+        deployRepoUrl: github.com?owner=surya-idp&repo=idp-gitops
+        pullRequestNumber: ${{ steps.pr.output.pullRequestNumber }}
+        mergeMethod: SQUASH
+        timeoutMinutes: 10
+
+  output:
+    links:
+      - title: Pull request
+        url: ${{ steps.pr.output.remoteUrl }}
+    text:
+      - title: What your service receives
+        content: |
+          Environment variables in the `app` container, a few minutes after the merge:
+          `DATABASE_URL` (postgresql://user:password@host:port/name?sslmode=require),
+          `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`.
+          The login owns the database, so the service can create its own tables.

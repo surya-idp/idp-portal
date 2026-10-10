@@ -4,6 +4,7 @@
 |---|---|---|
 | `python-service` | creates | a FastAPI service: repo, shared CI, deploy config, route, docs, catalog entry |
 | `decommission-service` | day-2 | removes any golden-path service everywhere and archives its repo |
+| `add-postgres-database` | day-2 | gives any golden-path service its own database and login |
 
 All are listed in `all-templates.yaml`, the one file Backstage reads. Adding a template is a
 git push; no image rebuild.
@@ -31,9 +32,18 @@ the service.
 for what it creates. `decommission-service` then works for its services with no change, and
 skips the steps whose annotation is absent.
 
-**Adding a new kind of resource** (for example a database): choose an annotation for it, have
-the creating template write it, and add one conditional step to `decommission-service`. That
-is one step in one template, not one removal template per creation template.
+**Adding a new kind of resource:** prefer declaring it **inside the service's gitops folder**,
+as an opt-in component (`idp-gitops/components/`). Then it needs nothing here at all:
+`decommission-service` deletes the folder and the controller behind the resource cleans up.
+The database works this way (`components/postgres`: the operator drops the database when the
+resources disappear). Only a resource that lives outside the folder (like the ECR repository)
+needs an annotation and one conditional step in `decommission-service`. Either way it is one
+change in one place, never one removal template per creation template.
+
+**Opting an existing service into a component** is one line in its `base/kustomization.yaml`.
+The action `idp:gitops:add-component` makes that edit for a pull request; `add-postgres-database`
+is the first template that uses it, and a future `add-cache` would be the same template with
+another component name.
 
 Template CI (`scripts/test-template.sh`) checks both sides: the rendered `python-service`
 catalog entry must carry the annotations, and `decommission-service` is dry-run against a

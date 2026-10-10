@@ -6,9 +6,10 @@
  *   idp:aws:ecr:delete-repository    decommission-service
  *   idp:github:archive-repo          decommission-service
  *   idp:catalog:unregister           decommission-service
+ *   idp:gitops:add-component         add-postgres-database (and any later opt-in component)
  *
- * Each handler is thin wiring; the behaviour lives in awaitCiAndAutoMerge.ts and
- * decommission.ts, which have unit tests.
+ * Each handler is thin wiring; the behaviour lives in awaitCiAndAutoMerge.ts,
+ * decommission.ts and kustomize.ts, which have unit tests.
  */
 import {
   coreServices,
@@ -31,6 +32,10 @@ import {
 import { catalogServiceRef } from '@backstage/plugin-catalog-node';
 import { DeleteRepositoryCommand, ECRClient } from '@aws-sdk/client-ecr';
 import { awaitCiAndAutoMerge, GitHubApi } from './awaitCiAndAutoMerge';
+import { mkdir, writeFile } from 'node:fs/promises';
+import nodePath from 'node:path';
+import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
+import { addKustomizeComponent } from './kustomize';
 import {
   archiveRepository,
   deleteEcrRepository,
@@ -227,6 +232,85 @@ export const idpScaffolderModule = createBackendModule({
                 `${files.length} file(s) under ${ctx.input.directory}`,
               );
               ctx.output('files', files);
+            },
+          }),
+
+          createTemplateAction({
+            id: 'idp:gitops:add-component',
+            description:
+              "Adds a platform component (for example postgres) to a service's base kustomization, as a file in the workspace for a pull request.",
+            supportsDryRun: true,
+            schema: {
+              input: {
+                repoUrl: z =>
+                  z.string({
+                    description: 'github.com?owner=<owner>&repo=<name>',
+                  }),
+                directory: z =>
+                  z.string({
+                    description: "The service's folder, as apps/<name>",
+                  }),
+                component: z =>
+                  z.string({
+                    description:
+                      'Component name under components/, for example postgres',
+                  }),
+                branch: z =>
+                  z.string({ description: 'Default: main' }).optional(),
+              },
+              output: {
+                changed: z => z.boolean(),
+                path: z => z.string(),
+              },
+            },
+            async handler(ctx) {
+              const repo = parseRepoUrl(ctx.input.repoUrl, integrations);
+              if (!repo.owner) {
+                throw new InputError('repoUrl needs an owner');
+              }
+              const directory = ctx.input.directory.replace(/^\/+|\/+$/g, '');
+              if (!/^apps\/[a-z][a-z0-9-]*[a-z0-9]$/.test(directory)) {
+                throw new InputError(
+                  `"${ctx.input.directory}" is not a service folder apps/<name>`,
+                );
+              }
+              const path = `${directory}/base/kustomization.yaml`;
+              // A dry run must not call GitHub: edit a minimal stand-in file instead.
+              let current =
+                'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - deployment.yaml\ncomponents:\n  - ../../../components/golden-path\n';
+              if (!ctx.isDryRun) {
+                const api = await githubClient(repo, ctx.logger);
+                const { data } = await api.request(
+                  'GET /repos/{owner}/{repo}/contents/{path}',
+                  {
+                    owner: repo.owner,
+                    repo: repo.repo,
+                    path,
+                    ref: ctx.input.branch ?? 'main',
+                  },
+                );
+                current = Buffer.from(data.content, 'base64').toString('utf8');
+              }
+              const result = addKustomizeComponent(
+                current,
+                `../../../components/${ctx.input.component}`,
+              );
+              if (result.changed) {
+                // Same relative path as in the repo, so the pull-request step changes
+                // exactly this one file.
+                const target = resolveSafeChildPath(ctx.workspacePath, path);
+                await mkdir(nodePath.dirname(target), { recursive: true });
+                await writeFile(target, result.content);
+                ctx.logger.info(
+                  `Added component ${ctx.input.component} to ${path}`,
+                );
+              } else {
+                ctx.logger.info(
+                  `${path} already uses component ${ctx.input.component}; nothing to change`,
+                );
+              }
+              ctx.output('changed', result.changed);
+              ctx.output('path', path);
             },
           }),
 
