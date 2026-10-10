@@ -1,0 +1,23 @@
+# Used only by scripts/test-template.sh (template CI): a throwaway backend that renders
+# templates through the scaffolder's dry-run API. Loaded on top of app-config.yaml.
+# Nothing here is a real credential, and a dry run never calls GitHub. Kept out of the repo
+# root on purpose: the image build copies app-config*.yaml from there.
+backend:
+  database:
+    client: better-sqlite3
+    connection: ':memory:'
+  auth:
+    externalAccess:
+      - type: static
+        options:
+          token: ${TEMPLATE_CI_TOKEN}
+          subject: template-ci
+
+integrations:
+  github:
+    - host: github.com
+      token: not-a-real-token
+
+# No network: the template under test is sent in the request, not read from the catalog.
+catalog:
+  locations: []

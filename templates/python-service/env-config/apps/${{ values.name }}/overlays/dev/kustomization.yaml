@@ -7,4 +7,5 @@ resources:
   - ../../base
 images:
   - name: 693906847772.dkr.ecr.ap-south-1.amazonaws.com/svc/${{ values.name }}
-    newTag: ${{ values.commitHash }}
+    # Quoted: a commit SHA made only of digits would otherwise be read as a number.
+    newTag: "${{ values.commitHash }}"
