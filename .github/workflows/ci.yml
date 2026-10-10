@@ -1,6 +1,8 @@
 # idp-portal (Backstage) CI
 #
-#   build            every push/PR: install, typecheck, build the backend bundle
+#   build            every push/PR: install, typecheck, unit tests, build the backend bundle
+#   template         every push/PR: render the python-service template with the real scaffolder
+#                    (dry run) and prove the result works (scripts/test-template.sh)
 #   image            main only: build the arm64 image, push to ECR (OIDC, no static keys), Trivy
 #   update-env-config main only: bump the tag in env-config (apps/idp-portal/overlays/dev)
 #
@@ -95,6 +97,44 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           severity: HIGH,CRITICAL
+
+  # A template change that would give developers a broken service fails here, before merge.
+  # x64 runner: it has kubectl preinstalled, and this job only tests (no image is pushed).
+  template:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      KUBECONFORM_VERSION: v0.8.0
+      KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Enable Corepack (Yarn 4 from packageManager)
+        run: corepack enable
+
+      - name: Install
+        run: yarn install --immutable
+
+      # Same uv version as the shared CI workflow (surya-idp/idp-platform).
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          enable-cache: false
+
+      - name: Install kubeconform (pinned + checksum) and PyYAML
+        run: |
+          curl -sSfL -o kc.tgz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kc.tgz" | sha256sum -c -
+          tar xzf kc.tgz kubeconform && sudo mv kubeconform /usr/local/bin/ && rm kc.tgz
+          python3 -c 'import yaml' || pip install --user pyyaml==6.0.2
+
+      - name: Render the template and test the result
+        run: ./scripts/test-template.sh
 
   update-env-config:
     needs: build

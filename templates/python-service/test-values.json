@@ -1,0 +1,10 @@
+{
+  "values": {
+    "repoUrl": "github.com?owner=surya-idp&repo=template-ci",
+    "description": "Rendered by template CI",
+    "owner": "user:default/dsurya11"
+  },
+  "secrets": {
+    "USER_OAUTH_TOKEN": "not-a-real-token"
+  }
+}
