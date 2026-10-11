@@ -1,5 +1,6 @@
 import {
   createFlag,
+  deleteServiceFlags,
   FlagApi,
   flagRequest,
   NewFlag,
@@ -130,5 +131,84 @@ describe('createFlag', () => {
       createFlag({ api, flag: { ...flag, name: 'Bad Name' }, log: jest.fn() }),
     ).rejects.toThrow(/flag name/);
     expect(calls).toEqual([]);
+  });
+});
+
+describe('deleteServiceFlags', () => {
+  function fakeFlagStore(
+    flags: { id: number; name: string }[],
+    deleteStatus = 204,
+  ) {
+    const deleted: string[] = [];
+    const api: FlagApi = {
+      post: async () => ({ status: 500, body: {} }),
+      get: async path => {
+        expect(path).toBe('/flags');
+        return { status: 200, body: flags };
+      },
+      delete: async path => {
+        deleted.push(path);
+        return { status: deleteStatus, body: {} };
+      },
+    };
+    return { api, deleted };
+  }
+
+  it('deletes the flags of this service and no others', async () => {
+    const { api, deleted } = fakeFlagStore([
+      { id: 1, name: 'orders.new-checkout' },
+      { id: 2, name: 'orders-v2.new-checkout' }, // another service with a similar name
+      { id: 3, name: 'billing.orders.x' },
+      { id: 4, name: 'orders.dark-mode' },
+      { id: 5, name: 'orders' }, // not "<service>.<flag>"
+    ]);
+    const log = jest.fn();
+    await expect(
+      deleteServiceFlags({ api, service: 'orders', log }),
+    ).resolves.toEqual(['orders.new-checkout', 'orders.dark-mode']);
+    expect(deleted).toEqual(['/flags/1', '/flags/4']);
+  });
+
+  it('is fine with a service that has no flags', async () => {
+    const { api, deleted } = fakeFlagStore([{ id: 1, name: 'billing.x' }]);
+    const log = jest.fn();
+    await expect(
+      deleteServiceFlags({ api, service: 'orders', log }),
+    ).resolves.toEqual([]);
+    expect(deleted).toEqual([]);
+    expect(log).toHaveBeenCalledWith('orders has no flags; nothing to delete');
+  });
+
+  it('treats a flag that is already gone as deleted (safe to run twice)', async () => {
+    const { api } = fakeFlagStore([{ id: 1, name: 'orders.x' }], 404);
+    await expect(
+      deleteServiceFlags({ api, service: 'orders', log: jest.fn() }),
+    ).resolves.toEqual(['orders.x']);
+  });
+
+  it('stops when the flag API refuses a delete', async () => {
+    const { api } = fakeFlagStore([{ id: 1, name: 'orders.x' }], 403);
+    await expect(
+      deleteServiceFlags({ api, service: 'orders', log: jest.fn() }),
+    ).rejects.toThrow(/Could not delete flag orders.x.*403/);
+  });
+
+  it('stops when the list cannot be read, instead of assuming there are none', async () => {
+    const api: FlagApi = {
+      post: async () => ({ status: 500, body: {} }),
+      get: async () => ({ status: 401, body: {} }),
+      delete: async () => ({ status: 204, body: {} }),
+    };
+    await expect(
+      deleteServiceFlags({ api, service: 'orders', log: jest.fn() }),
+    ).rejects.toThrow(/Could not list flags.*401/);
+  });
+
+  it('rejects something that is not a service name', async () => {
+    const { api, deleted } = fakeFlagStore([{ id: 1, name: '.x' }]);
+    await expect(
+      deleteServiceFlags({ api, service: '', log: jest.fn() }),
+    ).rejects.toThrow(/service name/);
+    expect(deleted).toEqual([]);
   });
 });

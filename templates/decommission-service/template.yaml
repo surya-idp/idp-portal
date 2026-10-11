@@ -19,8 +19,10 @@
 #   4. idp:github:await-ci-auto-merge  -> merges it when `validate` is green; Argo CD then removes
 #                                         the Application, pods, Service and the ALB route
 #   5. idp:aws:ecr:delete-repository   -> its ecr-repository and the images in it
-#   6. idp:github:archive-repo         -> the source repo becomes read-only (restorable)
-#   7. idp:catalog:unregister          -> the service leaves the catalog
+#   6. idp:flags:delete-for-service    -> its feature flags (<service>.*) in the flag API
+#   7. idp:aws:s3:delete-docs          -> its documentation site in the docs bucket
+#   8. idp:github:archive-repo         -> the source repo becomes read-only (restorable)
+#   9. idp:catalog:unregister          -> the service leaves the catalog
 #
 # Order matters: the deploy config goes first, so nothing is left running that points at images
 # or a catalog entry which no longer exist. Every step is safe to run again, so a run that
@@ -33,7 +35,7 @@ kind: Template
 metadata:
   name: decommission-service
   title: Decommission a service
-  description: Removes a golden-path service everywhere - deployment, load balancer route, images, catalog entry - and archives its repository.
+  description: Removes a golden-path service everywhere - deployment, load balancer route, database, images, feature flags, docs, catalog entry - and archives its repository.
   tags:
     - day-2
     - golden-path
@@ -124,6 +126,21 @@ spec:
       action: idp:aws:ecr:delete-repository
       input:
         repositoryName: ${{ steps.entity.output.entity.metadata.annotations['idp.surya-idp/ecr-repository'] }}
+
+    # The two below are not recorded in annotations: every golden-path service may have flags
+    # (stored as <service>.<flag>) and docs (uploaded by its CI under its name). Both steps
+    # are fine with "there are none".
+    - id: flags
+      name: Delete its feature flags
+      action: idp:flags:delete-for-service
+      input:
+        service: ${{ steps.entity.output.entity.metadata.name }}
+
+    - id: docs
+      name: Delete its documentation site
+      action: idp:aws:s3:delete-docs
+      input:
+        name: ${{ steps.entity.output.entity.metadata.name }}
 
     - id: archive
       name: Archive the repository

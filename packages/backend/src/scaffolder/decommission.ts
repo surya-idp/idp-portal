@@ -10,6 +10,7 @@
  *   deleteEcrRepository -> the service's images
  *   archiveRepository   -> the source repo (archived, not deleted: it can be restored)
  *   unregisterEntity    -> the catalog entry
+ *   deleteDocs          -> the documentation site in the docs bucket (TechDocs)
  */
 import { GitHubApi, RepoRef } from './awaitCiAndAutoMerge';
 
@@ -129,4 +130,46 @@ export async function unregisterEntity(options: {
   await catalog.removeLocationById(locationId);
   log(`Unregistered ${entityRef} from the catalog`);
   return true;
+}
+
+/** The two S3 calls this needs; satisfied by a thin wrapper around the AWS SDK client. */
+export interface DocsStore {
+  /** Keys of every object under `prefix`. */
+  list(prefix: string): Promise<string[]>;
+  delete(keys: string[]): Promise<void>;
+}
+
+/**
+ * Deletes a service's documentation site from the docs bucket. The site was uploaded by the
+ * service's CI under default/component/<name>/ and is not touched by anything else, so
+ * without this step the pages of a removed service would stay in the permanent bucket
+ * forever (seen 2026-10-11). Returns the number of objects deleted.
+ */
+export async function deleteDocs(options: {
+  store: DocsStore;
+  name: string;
+  log: (message: string) => void;
+}): Promise<number> {
+  const { store, name, log } = options;
+  // The name becomes part of a prefix that is then deleted recursively: it must be exactly
+  // one service name, never empty and never a path.
+  if (!/^[a-z][a-z0-9-]*[a-z0-9]$/.test(name)) {
+    throw new Error(`Refusing to delete docs of "${name}": not a service name`);
+  }
+  // The trailing slash keeps "orders" from matching "orders-v2/...".
+  const prefix = `default/component/${name}/`;
+  const keys = await store.list(prefix);
+  const outside = keys.filter(key => !key.startsWith(prefix));
+  if (outside.length > 0) {
+    throw new Error(
+      `The docs bucket listed objects outside ${prefix}; nothing was deleted`,
+    );
+  }
+  if (keys.length === 0) {
+    log(`No documentation under ${prefix}; nothing to delete`);
+    return 0;
+  }
+  await store.delete(keys);
+  log(`Deleted ${keys.length} documentation file(s) under ${prefix}`);
+  return keys.length;
 }

@@ -88,6 +88,8 @@ describe('IdpPermissionPolicy', () => {
       expect.arrayContaining([
         'idp:guard:platform-admin',
         'idp:aws:ecr:delete-repository',
+        'idp:aws:s3:delete-docs',
+        'idp:flags:delete-for-service',
         'idp:github:archive-repo',
         'idp:catalog:unregister',
       ]),

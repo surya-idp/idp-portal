@@ -13,6 +13,9 @@
 export interface FlagApi {
   /** POSTs JSON to the flag API. Resolves for every HTTP status; rejects only on network errors. */
   post(path: string, body: unknown): Promise<{ status: number; body: unknown }>;
+  /** GET and DELETE, same contract. Only the decommission action needs them. */
+  get?(path: string): Promise<{ status: number; body: unknown }>;
+  delete?(path: string): Promise<{ status: number; body: unknown }>;
 }
 
 export type FlagType = 'boolean' | 'percentage';
@@ -99,4 +102,51 @@ export async function createFlag(options: {
       response.body,
     ).slice(0, 300)}`,
   );
+}
+
+/**
+ * Deletes every flag of one service: the flags named "<service>.<anything>". Used when the
+ * service is decommissioned, so no flag outlives its owner. Safe to run twice. Returns the
+ * names that were deleted.
+ */
+export async function deleteServiceFlags(options: {
+  api: FlagApi;
+  service: string;
+  log: (message: string) => void;
+}): Promise<string[]> {
+  const { api, service, log } = options;
+  if (!NAME.test(service)) {
+    throw new Error(`"${service}" is not a service name`);
+  }
+  if (!api.get || !api.delete) {
+    throw new Error('This flag API client cannot list or delete flags');
+  }
+  const listed = await api.get('/flags');
+  if (listed.status !== 200 || !Array.isArray(listed.body)) {
+    throw new Error(
+      `Could not list flags: the flag API answered HTTP ${listed.status}`,
+    );
+  }
+  // The dot matters: service "orders" must not match the flags of "orders-v2".
+  const prefix = `${service}.`;
+  const own = (listed.body as { id: number; name: string }[]).filter(
+    flag => typeof flag.name === 'string' && flag.name.startsWith(prefix),
+  );
+  const deleted: string[] = [];
+  for (const flag of own) {
+    const response = await api.delete(`/flags/${flag.id}`);
+    // 404: somebody else deleted it in the meantime. The goal is reached either way.
+    if (response.status !== 204 && response.status !== 404) {
+      throw new Error(
+        `Could not delete flag ${flag.name}: the flag API answered HTTP ${response.status}`,
+      );
+    }
+    deleted.push(flag.name);
+  }
+  log(
+    deleted.length
+      ? `Deleted ${deleted.length} flag(s) of ${service}: ${deleted.join(', ')}`
+      : `${service} has no flags; nothing to delete`,
+  );
+  return deleted;
 }

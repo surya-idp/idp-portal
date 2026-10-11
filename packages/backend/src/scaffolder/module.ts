@@ -8,6 +8,8 @@
  *   idp:catalog:unregister           decommission-service
  *   idp:gitops:add-component         add-postgres-database (and any later opt-in component)
  *   idp:flags:create                 add-feature-flag
+ *   idp:flags:delete-for-service     decommission-service
+ *   idp:aws:s3:delete-docs           decommission-service
  *   idp:guard:platform-admin         first step of destructive templates (decommission-service)
  *
  * Each handler is thin wiring; the behaviour lives in awaitCiAndAutoMerge.ts,
@@ -33,14 +35,20 @@ import {
 } from '@backstage/plugin-scaffolder-node';
 import { catalogServiceRef } from '@backstage/plugin-catalog-node';
 import { DeleteRepositoryCommand, ECRClient } from '@aws-sdk/client-ecr';
+import {
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { awaitCiAndAutoMerge, GitHubApi } from './awaitCiAndAutoMerge';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import nodePath from 'node:path';
 import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
 import { addKustomizeComponent } from './kustomize';
-import { createFlag, flagRequest } from './flags';
+import { createFlag, deleteServiceFlags, FlagApi, flagRequest } from './flags';
 import {
   archiveRepository,
+  deleteDocs,
   deleteEcrRepository,
   listFiles,
   unregisterEntity,
@@ -84,6 +92,47 @@ export const idpScaffolderModule = createBackendModule({
             graphql: (query, variables) => octokit.graphql(query, variables),
           };
         };
+
+        // The flag API as Backstage's own Kubernetes ServiceAccount. Address and token file are
+        // set by the platform on the Backstage pod (idp-gitops apps/idp-portal); the token is
+        // valid for the flag API only. Nothing is stored here.
+        const flagApiClient = (): FlagApi => {
+          const url = process.env.FLAG_API_URL;
+          const tokenFile = process.env.FLAG_API_TOKEN_FILE;
+          if (!url || !tokenFile) {
+            throw new InputError(
+              'FLAG_API_URL and FLAG_API_TOKEN_FILE are not set: this action works only inside the cluster',
+            );
+          }
+          const call = async (method: string, path: string, body?: unknown) => {
+            // Read on every call: Kubernetes replaces the file before it expires.
+            const token = (await readFile(tokenFile, 'utf8')).trim();
+            const response = await fetch(`${url.replace(/\/+$/, '')}${path}`, {
+              method,
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: body === undefined ? undefined : JSON.stringify(body),
+              signal: AbortSignal.timeout(10_000),
+            });
+            return {
+              status: response.status,
+              body: await response.json().catch(() => ({})),
+            };
+          };
+          return {
+            post: (path, body) => call('POST', path, body),
+            get: path => call('GET', path),
+            delete: path => call('DELETE', path),
+          };
+        };
+
+        // Where service CI publishes documentation sites: the same bucket TechDocs reads
+        // (app-config.production.yaml). Absent in local development.
+        const docsBucket = config.getOptionalString(
+          'techdocs.publisher.awsS3.bucketName',
+        );
 
         scaffolder.addActions(
           createTemplateAction({
@@ -389,43 +438,121 @@ export const idpScaffolderModule = createBackendModule({
                 ctx.output('flagName', body.name as string);
                 return;
               }
-              // Set by the platform on the Backstage pod (idp-gitops apps/idp-portal): the
-              // flag API's address and a ServiceAccount token that is valid for it only.
-              const url = process.env.FLAG_API_URL;
-              const tokenFile = process.env.FLAG_API_TOKEN_FILE;
-              if (!url || !tokenFile) {
-                throw new InputError(
-                  'FLAG_API_URL and FLAG_API_TOKEN_FILE are not set: this action works only inside the cluster',
-                );
-              }
               const result = await createFlag({
-                api: {
-                  post: async (path, body) => {
-                    // Read on every call: Kubernetes replaces the file before it expires.
-                    const token = (await readFile(tokenFile, 'utf8')).trim();
-                    const response = await fetch(
-                      `${url.replace(/\/+$/, '')}${path}`,
-                      {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          Authorization: `Bearer ${token}`,
-                        },
-                        body: JSON.stringify(body),
-                        signal: AbortSignal.timeout(10_000),
-                      },
-                    );
-                    return {
-                      status: response.status,
-                      body: await response.json().catch(() => ({})),
-                    };
-                  },
-                },
+                api: flagApiClient(),
                 flag,
                 log: message => ctx.logger.info(message),
               });
               ctx.output('created', result.created);
               ctx.output('flagName', result.name);
+            },
+          }),
+
+          createTemplateAction({
+            id: 'idp:flags:delete-for-service',
+            description:
+              "Deletes every feature flag of one service (the flags named <service>.<flag>) from the platform's flag API, so no flag outlives its service.",
+            supportsDryRun: true,
+            schema: {
+              input: {
+                service: z =>
+                  z.string({ description: 'The service being removed' }),
+              },
+              output: {
+                deleted: z => z.array(z.string()),
+              },
+            },
+            async handler(ctx) {
+              if (ctx.isDryRun) {
+                ctx.logger.info(
+                  `Dry run: would delete the flags named ${ctx.input.service}.*`,
+                );
+                ctx.output('deleted', []);
+                return;
+              }
+              const deleted = await deleteServiceFlags({
+                api: flagApiClient(),
+                service: ctx.input.service,
+                log: message => ctx.logger.info(message),
+              });
+              ctx.output('deleted', deleted);
+            },
+          }),
+
+          createTemplateAction({
+            id: 'idp:aws:s3:delete-docs',
+            description:
+              "Deletes one service's documentation site (TechDocs) from the docs bucket. Uses the pod's IAM role, which may delete only under default/component/.",
+            supportsDryRun: true,
+            schema: {
+              input: {
+                name: z =>
+                  z.string({ description: 'The service being removed' }),
+              },
+              output: {
+                deleted: z => z.number(),
+              },
+            },
+            async handler(ctx) {
+              if (ctx.isDryRun) {
+                ctx.logger.info(
+                  `Dry run: would delete default/component/${ctx.input.name}/ from ${docsBucket}`,
+                );
+                ctx.output('deleted', 0);
+                return;
+              }
+              if (!docsBucket) {
+                throw new InputError(
+                  'techdocs.publisher.awsS3.bucketName is not configured: there is no docs bucket to clean',
+                );
+              }
+              const s3 = new S3Client({});
+              const deleted = await deleteDocs({
+                store: {
+                  list: async prefix => {
+                    const keys: string[] = [];
+                    let token: string | undefined;
+                    do {
+                      const page = await s3.send(
+                        new ListObjectsV2Command({
+                          Bucket: docsBucket,
+                          Prefix: prefix,
+                          ContinuationToken: token,
+                        }),
+                      );
+                      for (const object of page.Contents ?? []) {
+                        if (object.Key) keys.push(object.Key);
+                      }
+                      token = page.NextContinuationToken;
+                    } while (token);
+                    return keys;
+                  },
+                  delete: async keys => {
+                    // The API takes at most 1000 keys per call.
+                    for (let i = 0; i < keys.length; i += 1000) {
+                      const result = await s3.send(
+                        new DeleteObjectsCommand({
+                          Bucket: docsBucket,
+                          Delete: {
+                            Objects: keys
+                              .slice(i, i + 1000)
+                              .map(Key => ({ Key })),
+                            Quiet: true,
+                          },
+                        }),
+                      );
+                      if (result.Errors?.length) {
+                        throw new Error(
+                          `Could not delete ${result.Errors.length} documentation file(s): ${result.Errors[0].Code} ${result.Errors[0].Key}`,
+                        );
+                      }
+                    }
+                  },
+                },
+                name: ctx.input.name,
+                log: message => ctx.logger.info(message),
+              });
+              ctx.output('deleted', deleted);
             },
           }),
 
