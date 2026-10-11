@@ -22,6 +22,8 @@
 #   6. idp:flags:delete-for-service    -> its feature flags (<service>.*) in the flag API
 #   7. idp:aws:s3:delete-docs          -> its documentation site in the docs bucket
 #   8. idp:github:archive-repo         -> the source repo becomes read-only (restorable)
+#      or idp:github:delete-repo       -> deleted for good, only if the form's box was ticked
+#                                         (test services; platform repositories are refused)
 #   9. idp:catalog:unregister          -> the service leaves the catalog
 #
 # Order matters: the deploy config goes first, so nothing is left running that points at images
@@ -62,8 +64,17 @@ spec:
               metadata.annotations.idp.surya-idp/template-version:
                 exists: true
             defaultKind: Component
+        deleteRepository:
+          title: Delete the repository instead of archiving it
+          type: boolean
+          default: false
+          description: >-
+            For throwaway test services only. Leave this off for a real service: an archived
+            repository keeps its code and history and can be restored, a deleted one cannot.
+            The one reason to tick it: an archived repository keeps its name taken, so a test
+            service could not be created again under the same name.
         confirm:
-          title: I understand that this stops the service, deletes its images and archives its repository
+          title: I understand that this stops the service, deletes its images and archives or deletes its repository
           type: boolean
           # Schema rule, not a hint: the form cannot be submitted until the box is ticked.
           enum: [true]
@@ -142,10 +153,19 @@ spec:
       input:
         name: ${{ steps.entity.output.entity.metadata.name }}
 
+    # Exactly one of the next two runs. Archiving is the default and the right choice for a
+    # real service; deleting happens only when the box on the form was ticked.
     - id: archive
       name: Archive the repository
-      if: ${{ steps.entity.output.entity.metadata.annotations['github.com/project-slug'] }}
+      if: ${{ steps.entity.output.entity.metadata.annotations['github.com/project-slug'] and not parameters.deleteRepository }}
       action: idp:github:archive-repo
+      input:
+        projectSlug: ${{ steps.entity.output.entity.metadata.annotations['github.com/project-slug'] }}
+
+    - id: delete
+      name: Delete the repository (cannot be undone)
+      if: ${{ steps.entity.output.entity.metadata.annotations['github.com/project-slug'] and parameters.deleteRepository }}
+      action: idp:github:delete-repo
       input:
         projectSlug: ${{ steps.entity.output.entity.metadata.annotations['github.com/project-slug'] }}
 
