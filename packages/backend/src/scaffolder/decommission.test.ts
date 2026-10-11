@@ -4,6 +4,8 @@ import {
   deleteEcrRepository,
   listFiles,
   unregisterEntity,
+  deleteDocs,
+  DocsStore,
 } from './decommission';
 
 const repo = { owner: 'org', repo: 'gitops' };
@@ -189,5 +191,68 @@ describe('unregisterEntity', () => {
       }),
     ).resolves.toBe(false);
     expect(catalog.removeLocationById).not.toHaveBeenCalled();
+  });
+});
+
+describe('deleteDocs', () => {
+  function fakeStore(keys: string[]) {
+    const calls: { listed: string[]; deleted: string[][] } = {
+      listed: [],
+      deleted: [],
+    };
+    const store: DocsStore = {
+      list: async prefix => {
+        calls.listed.push(prefix);
+        return keys;
+      },
+      delete: async toDelete => {
+        calls.deleted.push(toDelete);
+      },
+    };
+    return { store, calls };
+  }
+
+  it('deletes everything under the service prefix, with the trailing slash', async () => {
+    const keys = [
+      'default/component/orders/index.html',
+      'default/component/orders/runbook/index.html',
+    ];
+    const { store, calls } = fakeStore(keys);
+    const log = jest.fn();
+    await expect(deleteDocs({ store, name: 'orders', log })).resolves.toBe(2);
+    // "orders/" so that the docs of "orders-v2" are never listed
+    expect(calls.listed).toEqual(['default/component/orders/']);
+    expect(calls.deleted).toEqual([keys]);
+  });
+
+  it('does nothing when the service never published docs', async () => {
+    const { store, calls } = fakeStore([]);
+    await expect(
+      deleteDocs({ store, name: 'orders', log: jest.fn() }),
+    ).resolves.toBe(0);
+    expect(calls.deleted).toEqual([]);
+  });
+
+  it.each(['', '/', '..', 'orders/../billing', 'Orders', 'a/b', '*'])(
+    'refuses the name %p before touching the bucket',
+    async name => {
+      const { store, calls } = fakeStore(['default/component/x/index.html']);
+      await expect(deleteDocs({ store, name, log: jest.fn() })).rejects.toThrow(
+        /not a service name/,
+      );
+      expect(calls.listed).toEqual([]);
+      expect(calls.deleted).toEqual([]);
+    },
+  );
+
+  it('deletes nothing if the listing contains a key outside the prefix', async () => {
+    const { store, calls } = fakeStore([
+      'default/component/orders/index.html',
+      'default/component/billing/index.html',
+    ]);
+    await expect(
+      deleteDocs({ store, name: 'orders', log: jest.fn() }),
+    ).rejects.toThrow(/outside/);
+    expect(calls.deleted).toEqual([]);
   });
 });

@@ -53,6 +53,8 @@ export const ADMIN_GROUP = 'group:default/platform-admins';
 export const ADMIN_ONLY_ACTIONS = [
   'idp:guard:platform-admin',
   'idp:aws:ecr:delete-repository',
+  'idp:aws:s3:delete-docs',
+  'idp:flags:delete-for-service',
   'idp:github:archive-repo',
   'idp:catalog:unregister',
   'github:repo:delete',
