@@ -7,9 +7,10 @@
  *   idp:github:archive-repo          decommission-service
  *   idp:catalog:unregister           decommission-service
  *   idp:gitops:add-component         add-postgres-database (and any later opt-in component)
+ *   idp:flags:create                 add-feature-flag
  *
  * Each handler is thin wiring; the behaviour lives in awaitCiAndAutoMerge.ts,
- * decommission.ts and kustomize.ts, which have unit tests.
+ * decommission.ts, kustomize.ts and flags.ts, which have unit tests.
  */
 import {
   coreServices,
@@ -32,10 +33,11 @@ import {
 import { catalogServiceRef } from '@backstage/plugin-catalog-node';
 import { DeleteRepositoryCommand, ECRClient } from '@aws-sdk/client-ecr';
 import { awaitCiAndAutoMerge, GitHubApi } from './awaitCiAndAutoMerge';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import nodePath from 'node:path';
 import { resolveSafeChildPath } from '@backstage/backend-plugin-api';
 import { addKustomizeComponent } from './kustomize';
+import { createFlag, flagRequest } from './flags';
 import {
   archiveRepository,
   deleteEcrRepository,
@@ -311,6 +313,105 @@ export const idpScaffolderModule = createBackendModule({
               }
               ctx.output('changed', result.changed);
               ctx.output('path', path);
+            },
+          }),
+
+          createTemplateAction({
+            id: 'idp:flags:create',
+            description:
+              "Creates a feature flag for a service in the platform's flag API, as Backstage's own Kubernetes ServiceAccount. A flag that already exists is left unchanged.",
+            supportsDryRun: true,
+            schema: {
+              input: {
+                service: z =>
+                  z.string({ description: 'The service that owns the flag' }),
+                name: z =>
+                  z.string({
+                    description:
+                      'Short flag name, for example new-checkout. Stored as <service>.<name>',
+                  }),
+                type: z => z.enum(['boolean', 'percentage']),
+                enabled: z =>
+                  z
+                    .boolean()
+                    .describe(
+                      'boolean: on or off for everyone. percentage: the answer outside the rollout. Default: false',
+                    )
+                    .optional(),
+                rolloutPercentage: z =>
+                  z
+                    .number()
+                    .describe('percentage flags only: 0 to 100')
+                    .optional(),
+                description: z => z.string().optional(),
+                environment: z =>
+                  z.string().describe('Default: dev').optional(),
+              },
+              output: {
+                created: z => z.boolean(),
+                flagName: z => z.string(),
+              },
+            },
+            async handler(ctx) {
+              const flag = {
+                service: ctx.input.service,
+                name: ctx.input.name,
+                type: ctx.input.type,
+                // Defaults are applied here, not in the schema (see await-ci-auto-merge).
+                enabled: ctx.input.enabled ?? false,
+                // The form sends a percentage even for a boolean flag; it means nothing there.
+                rolloutPercentage:
+                  ctx.input.type === 'percentage'
+                    ? ctx.input.rolloutPercentage
+                    : undefined,
+                description: ctx.input.description,
+                environment: ctx.input.environment ?? 'dev',
+              };
+              if (ctx.isDryRun) {
+                // Validate the input the same way, but do not call the flag API.
+                const body = flagRequest(flag);
+                ctx.logger.info(`Dry run: would create flag ${body.name}`);
+                ctx.output('created', false);
+                ctx.output('flagName', body.name as string);
+                return;
+              }
+              // Set by the platform on the Backstage pod (idp-gitops apps/idp-portal): the
+              // flag API's address and a ServiceAccount token that is valid for it only.
+              const url = process.env.FLAG_API_URL;
+              const tokenFile = process.env.FLAG_API_TOKEN_FILE;
+              if (!url || !tokenFile) {
+                throw new InputError(
+                  'FLAG_API_URL and FLAG_API_TOKEN_FILE are not set: this action works only inside the cluster',
+                );
+              }
+              const result = await createFlag({
+                api: {
+                  post: async (path, body) => {
+                    // Read on every call: Kubernetes replaces the file before it expires.
+                    const token = (await readFile(tokenFile, 'utf8')).trim();
+                    const response = await fetch(
+                      `${url.replace(/\/+$/, '')}${path}`,
+                      {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify(body),
+                        signal: AbortSignal.timeout(10_000),
+                      },
+                    );
+                    return {
+                      status: response.status,
+                      body: await response.json().catch(() => ({})),
+                    };
+                  },
+                },
+                flag,
+                log: message => ctx.logger.info(message),
+              });
+              ctx.output('created', result.created);
+              ctx.output('flagName', result.name);
             },
           }),
 

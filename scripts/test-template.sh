@@ -104,6 +104,25 @@ grep -q 'components/postgres' "$WORK/add-postgres/apps/template-ci/base/kustomiz
   || { echo "the postgres component was not added"; exit 1; }
 
 echo
+echo "    add-feature-flag (dry run against the stand-in catalog entry)"
+ADDFLAG=templates/add-feature-flag
+python3 - "$ADDFLAG/template.yaml" "$actions" <<'PY'
+import json, sys, yaml
+template = yaml.safe_load(open(sys.argv[1]))
+installed = {a["id"] for a in json.load(open(sys.argv[2]))}
+missing = [s["action"] for s in template["spec"]["steps"] if s["action"] not in installed]
+if missing:
+    sys.exit(f"{sys.argv[1]} uses actions this backend does not have: {missing}")
+PY
+node scripts/template-dry-run.mjs "$ADDFLAG" "$ADDFLAG/test-values.json" "$WORK/add-flag"
+# The flag is stored under its service (the name is in the text shown to the user), and the
+# template changes no repository.
+grep -q 'template-ci.new-checkout' "$WORK/add-flag/.dry-run-output.json" \
+  || { echo "add-feature-flag did not name the flag <service>.<flag>"; exit 1; }
+extra="$(find "$WORK/add-flag" -type f ! -name .dry-run-output.json)"
+[ -z "$extra" ] || { echo "add-feature-flag wrote files; it should change no repository:"; echo "$extra"; exit 1; }
+
+echo
 echo "    decommission-service (dry run against the stand-in catalog entry)"
 DECOM=templates/decommission-service
 python3 - "$DECOM/template.yaml" "$actions" <<'PY'
@@ -213,4 +232,4 @@ grep -rl "$SERVICE" "$WORK/idp-gitops/apps/$SERVICE-pg" | xargs sed -i "s/$SERVI
 
 echo
 echo "Templates OK: python-service (with and without a database) rendered, checked, built and validated;"
-echo "              add-postgres-database and decommission-service dry runs clean."
+echo "              add-postgres-database, add-feature-flag and decommission-service dry runs clean."

@@ -10,3 +10,4 @@ spec:
     - ./python-service/template.yaml
     - ./decommission-service/template.yaml
     - ./add-postgres-database/template.yaml
+    - ./add-feature-flag/template.yaml

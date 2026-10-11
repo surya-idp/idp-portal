@@ -34,6 +34,25 @@ login owns the database, so the service creates its own tables. To use it: add a
 and register a readiness check in `app/health.py` so the pod only takes traffic when the
 database answers.
 
+## Feature flags
+
+Ship code switched off, then switch it on without a deploy.
+
+1. Backstage -> Create -> **Add a feature flag**, pick this service, name the flag.
+2. Check it where the behaviour changes:
+
+   ```python
+   from app.flags import is_enabled
+
+   if await is_enabled("new-checkout", user_id=user_id):
+       ...
+   ```
+
+`is_enabled` never raises and never waits long: if the flag service cannot be reached, or the
+flag does not exist, it returns `False` (or the `default=` you pass). The service proves who it
+is with a token Kubernetes mounts into the pod; there is nothing to configure. Locally and in
+tests every flag is its default.
+
 ## How a change reaches the cluster
 
 1. Push to `main` (or merge a PR). CI runs lint, type check and tests, builds the arm64 image,
