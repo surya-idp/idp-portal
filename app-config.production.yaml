@@ -74,6 +74,34 @@ auth:
     # production build (the provider refuses outside development) and the sign-in page
     # does not offer it.
 
+# Documentation sites (the Docs tab of a service). Backstage only READS them: each service's
+# CI builds its docs/ folder and uploads the site to this bucket (idp-platform, job `docs`).
+# The project's recommended production setup, and the only one that works in a pod: the
+# built-in builder needs Docker. Credentials: the pod's IAM role (EKS Pod Identity), read-only.
+techdocs:
+  builder: external
+  publisher:
+    type: awsS3
+    awsS3:
+      bucketName: idp-techdocs-693906847772
+      region: ap-south-1
+
+# The Kubernetes tab of a service: its pods, deployments and their state, live.
+# Backstage asks the cluster it runs in, as its own ServiceAccount, which has a read-only
+# role (idp-gitops platform/cluster/backstage-read.yaml). No token or kubeconfig is stored.
+# A service is matched to its resources by the label backstage.io/kubernetes-id, which the
+# golden path sets on everything it deploys.
+kubernetes:
+  serviceLocatorMethod:
+    type: multiTenant
+  clusterLocatorMethods:
+    - type: config
+      clusters:
+        - name: idp
+          url: https://kubernetes.default.svc
+          authProvider: serviceAccount
+          # No serviceAccountToken: the plugin then uses the pod's own mounted token and CA.
+
 # Enforced by our policy: destructive scaffolder actions and removing catalog entries are
 # for group platform-admins (examples/org.yaml).
 permission:
