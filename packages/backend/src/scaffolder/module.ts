@@ -8,6 +8,7 @@
  *   idp:catalog:unregister           decommission-service
  *   idp:gitops:add-component         add-postgres-database (and any later opt-in component)
  *   idp:flags:create                 add-feature-flag
+ *   idp:guard:platform-admin         first step of destructive templates (decommission-service)
  *
  * Each handler is thin wiring; the behaviour lives in awaitCiAndAutoMerge.ts,
  * decommission.ts, kustomize.ts and flags.ts, which have unit tests.
@@ -178,6 +179,19 @@ export const idpScaffolderModule = createBackendModule({
               });
               ctx.output('ciRunUrl', result.ciRunUrl);
               ctx.output('mergeCommitSha', result.mergeCommitSha);
+            },
+          }),
+
+          createTemplateAction({
+            id: 'idp:guard:platform-admin',
+            description:
+              'Does nothing. It is on the list of actions only platform admins may run (permissions/policy.ts), so as the first step of a destructive template it stops everyone else before anything is changed.',
+            supportsDryRun: true,
+            schema: { input: {}, output: {} },
+            async handler(ctx) {
+              ctx.logger.info(
+                'Allowed: this user may run destructive platform actions',
+              );
             },
           }),
 

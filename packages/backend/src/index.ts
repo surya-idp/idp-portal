@@ -8,6 +8,7 @@
 
 import { createBackend } from '@backstage/backend-defaults';
 import { idpScaffolderModule } from './scaffolder/module';
+import { idpPermissionPolicyModule } from './permissions/module';
 
 const backend = createBackend();
 
@@ -41,14 +42,17 @@ backend.add(
 );
 
 // See https://backstage.io/docs/features/software-catalog/configuration#subscribing-to-catalog-errors
+// Finds catalog-info.yaml in every repo of the GitHub org on a schedule
+// (catalog.providers.github in app-config.production.yaml). Does nothing without that config.
+backend.add(import('@backstage/plugin-catalog-backend-module-github'));
+
 backend.add(import('@backstage/plugin-catalog-backend-module-logs'));
 
 // permission plugin
 backend.add(import('@backstage/plugin-permission-backend'));
-// See https://backstage.io/docs/permissions/getting-started for how to create your own permission policy
-backend.add(
-  import('@backstage/plugin-permission-backend-module-allow-all-policy'),
-);
+// Our own policy (./permissions/policy.ts): destructive actions are for platform-admins.
+// Consulted only where permission.enabled is true (app-config.production.yaml).
+backend.add(idpPermissionPolicyModule);
 
 // search plugin
 backend.add(import('@backstage/plugin-search-backend'));

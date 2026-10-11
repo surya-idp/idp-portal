@@ -8,20 +8,25 @@ import { githubAuthApiRef } from '@backstage/core-plugin-api';
 // user's token, because an App installation token cannot create repos in a user account.
 const signInPage = SignInPageBlueprint.make({
   params: {
-    loader: async () => props => (
-      <SignInPage
-        {...props}
-        providers={[
-          {
-            id: 'github-auth-provider',
-            title: 'GitHub',
-            message: 'Sign in with GitHub (needed to run templates)',
-            apiRef: githubAuthApiRef,
-          },
-          'guest',
-        ]}
-      />
-    ),
+    loader: async () => props =>
+      (
+        <SignInPage
+          {...props}
+          providers={[
+            {
+              id: 'github-auth-provider',
+              title: 'GitHub',
+              message: 'Sign in with GitHub (needed to run templates)',
+              apiRef: githubAuthApiRef,
+            },
+            // Guest only when running locally (`yarn start`). The deployed portal has no
+            // guest: who you are decides what you may do (packages/backend/src/permissions).
+            ...(process.env.NODE_ENV === 'production'
+              ? []
+              : ['guest' as const]),
+          ]}
+        />
+      ),
   },
 });
 

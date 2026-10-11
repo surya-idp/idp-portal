@@ -32,6 +32,13 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
+    # One build per branch at a time, in push order. Image Updater deploys the image that was
+    # BUILT last, so two merges seconds apart must not build in parallel: the older commit
+    # could finish second and be deployed (both ran side by side on 2026-10-11). If a third
+    # push arrives while one waits, GitHub drops the waiting one; the newest still wins.
+    concurrency:
+      group: build-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write          # OIDC to AWS (image step, main only)

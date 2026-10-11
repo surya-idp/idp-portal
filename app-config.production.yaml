@@ -69,30 +69,72 @@ auth:
           resolvers:
             # GitHub login must equal a User entity name (examples/org.yaml)
             - resolver: usernameMatchingUserEntityName
-    # Guest stays as a fallback (a template run still asks for GitHub). Acceptable only because Backstage is NOT
-    # exposed: no Ingress, port-forward only (cluster credentials = access control).
-    guest:
-      dangerouslyAllowOutsideDevelopment: true
+    # No guest sign-in here: what a person may do depends on who they are
+    # (packages/backend/src/permissions). app-config.yaml's `guest: {}` is harmless in a
+    # production build (the provider refuses outside development) and the sign-in page
+    # does not offer it.
+
+# Documentation sites (the Docs tab of a service). Backstage only READS them: each service's
+# CI builds its docs/ folder and uploads the site to this bucket (idp-platform, job `docs`).
+# The project's recommended production setup, and the only one that works in a pod: the
+# built-in builder needs Docker. Credentials: the pod's IAM role (EKS Pod Identity), read-only.
+techdocs:
+  builder: external
+  publisher:
+    type: awsS3
+    awsS3:
+      bucketName: idp-techdocs-693906847772
+      region: ap-south-1
+
+# The Kubernetes tab of a service: its pods, deployments and their state, live.
+# Backstage asks the cluster it runs in, as its own ServiceAccount, which has a read-only
+# role (idp-gitops platform/cluster/backstage-read.yaml). No token or kubeconfig is stored.
+# A service is matched to its resources by the label backstage.io/kubernetes-id, which the
+# golden path sets on everything it deploys.
+kubernetes:
+  serviceLocatorMethod:
+    type: multiTenant
+  clusterLocatorMethods:
+    - type: config
+      clusters:
+        - name: idp
+          url: https://kubernetes.default.svc
+          authProvider: serviceAccount
+          # No serviceAccountToken: the plugin then uses the pod's own mounted token and CA.
+
+# Enforced by our policy: destructive scaffolder actions and removing catalog entries are
+# for group platform-admins (examples/org.yaml).
+permission:
+  enabled: true
 
 catalog:
   # Overrides the default list locations from app-config.yaml as these contain example data.
   # See https://backstage.io/docs/features/software-catalog/#adding-components-to-the-catalog for more details
   # on how to get entities into the catalog.
-  locations:
-    # The first real service in the catalog.
-    - type: url
-      target: https://github.com/surya-idp/feature-flag-service/blob/main/catalog-info.yaml
+  # Every repository of the org that has a catalog-info.yaml on main is in the catalog, found
+  # by a scan every 5 minutes. No list to maintain: a new service appears by itself (the
+  # create template also registers it at once, so nobody waits for the scan), and an archived
+  # repository drops out by itself (allowArchived defaults to false), which is what
+  # "Decommission a service" does to a repo.
+  providers:
+    github:
+      surya-idp:
+        organization: surya-idp
+        catalogPath: /catalog-info.yaml
+        filters:
+          branch: main
+        schedule:
+          frequency: { minutes: 5 }
+          timeout: { minutes: 3 }
 
+  locations:
     # Every golden path template, listed in one Location read from GitHub: adding or
     # changing a template is a git push, no image rebuild. (Template is allowed by the
     # global catalog.rules in app-config.yaml; nested targets do not inherit per-location rules.)
     - type: url
       target: https://github.com/surya-idp/idp-portal/blob/main/templates/all-templates.yaml
 
-    - type: url
-      target: https://github.com/surya-idp/idp-portal/blob/main/catalog-info.yaml
-
-    # The guest user/group that guest sign-in resolves to (path relative to the
+    # Users and groups: who can sign in, and who is a platform admin (path relative to the
     # container's working directory)
     - type: file
       target: ./examples/org.yaml
