@@ -96,7 +96,6 @@ def test_any_bad_answer_gives_the_default(
 ) -> None:
     flag_service.status, flag_service.answer = status, answer
     assert enabled("new-checkout", default=True) is True
-    flags.clear_cache()
     assert enabled("new-checkout", default=False) is False
 
 
@@ -118,6 +117,18 @@ def test_a_missing_token_file_gives_the_default(
     get_settings.cache_clear()
     assert enabled("new-checkout", default=False) is False
     assert flag_service.requests == []
+
+
+def test_a_default_is_never_remembered(flag_service: FlagService) -> None:
+    # Found on the cluster (2026-10-11): the first call's default was cached and returned to
+    # a later call that passed a different default.
+    flag_service.answer = {"enabled": False, "reason": "flag_not_found"}
+    assert enabled("missing") is False
+    assert enabled("missing", default=True) is True
+    assert enabled("missing") is False
+    # ...and once the flag exists, its real answer is used at once.
+    flag_service.answer = {"enabled": True, "reason": "boolean_flag"}
+    assert enabled("missing") is True
 
 
 def test_the_answer_is_reused_per_flag_and_user(flag_service: FlagService) -> None:
