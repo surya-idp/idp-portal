@@ -14,7 +14,7 @@ Created from the **idp python-service golden path** (Backstage template).
 | Image | ECR `svc/${{ values.name }}`, tagged with the commit SHA |
 | Deployment | `idp-gitops` -> `apps/${{ values.name }}` (Argo CD, automated sync) |
 | URL | `http://<ALB>/${{ values.name }}/` (API docs at `/${{ values.name }}/docs`) |
-| Docs | `docs/` (TechDocs), including the runbook |
+| Docs | `docs/` (TechDocs), including the runbook. CI builds them on every push (a broken page fails the pull request) and publishes them on `main`; read them in Backstage on this service's **Docs** tab |
 
 ## Work on it
 
