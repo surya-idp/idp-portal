@@ -19,7 +19,7 @@ permissions: {}
 
 jobs:
   ci:
-    uses: surya-idp/idp-platform/.github/workflows/python-service.yml@48676e8ff8f08d7aeeee11700ad7f0285d58ffe6 # v2.1.0
+    uses: surya-idp/idp-platform/.github/workflows/python-service.yml@3d15dbfbf73ecf7df2ab8e72238bc4c4f1e6bf3c # v2.1.1
     permissions:
       contents: read
       id-token: write       # OIDC to AWS for the ECR push and to Sigstore for signing: no stored keys
