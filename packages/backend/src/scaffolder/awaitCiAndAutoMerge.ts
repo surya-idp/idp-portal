@@ -78,7 +78,14 @@ async function runsVerdict(
     head_sha: sha,
     per_page: 100,
   });
-  const runs: any[] = data.workflow_runs ?? [];
+  // Only runs of the repo's own workflows count. GitHub also lists runs it starts itself for
+  // the same commit, with the event "dynamic": Dependabot's update jobs and CodeQL default
+  // setup. On a brand-new repo three Dependabot runs start at once (first seen 2026-10-11).
+  // Counted as CI, they could all finish before the real workflow run even appears, and the
+  // deploy PR would be merged for an image that does not exist yet.
+  const runs: any[] = (data.workflow_runs ?? []).filter(
+    (r: any) => r.event !== 'dynamic',
+  );
   const failed = runs.find(r => FAILED_CONCLUSIONS.includes(r.conclusion));
   if (failed) {
     return {

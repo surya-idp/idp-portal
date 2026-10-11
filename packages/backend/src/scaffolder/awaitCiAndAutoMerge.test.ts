@@ -121,6 +121,35 @@ describe('awaitCiAndAutoMerge', () => {
     });
   });
 
+  it("does not take GitHub's own runs (Dependabot, CodeQL) for CI", async () => {
+    const dependabot = (conclusion: string | null) => ({
+      ...run(conclusion ? 'completed' : 'in_progress', conclusion),
+      event: 'dynamic',
+      html_url: 'https://github.test/run/dependabot',
+    });
+    const { api, calls } = fakeGitHub({
+      serviceRuns: [
+        // Dependabot finished, the real workflow run has not appeared yet: keep waiting.
+        [dependabot('success'), dependabot('success')],
+        [dependabot('success'), run('in_progress', null)],
+        // A failed Dependabot run says nothing about the image either.
+        [dependabot('failure'), run('completed', 'success')],
+      ],
+      prs: [
+        pr(),
+        pr({ merged: true, state: 'closed', merge_commit_sha: 'merged9' }),
+      ],
+    });
+
+    const result = await awaitCiAndAutoMerge(options(api));
+
+    expect(result).toEqual({
+      ciRunUrl: 'https://github.test/run/completed-success',
+      mergeCommitSha: 'merged9',
+    });
+    expect(calls.filter(c => c === `${RUNS} svc`)).toHaveLength(3);
+  });
+
   it('fails and never touches the PR when CI fails', async () => {
     const { api, calls } = fakeGitHub({
       serviceRuns: [[run('completed', 'failure')]],
