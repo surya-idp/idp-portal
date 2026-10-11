@@ -3,8 +3,12 @@
 #   build            every push/PR: install, typecheck, unit tests, build the backend bundle
 #   template         every push/PR: render the python-service template with the real scaffolder
 #                    (dry run) and prove the result works (scripts/test-template.sh)
-#   image            main only: build the arm64 image, push to ECR (OIDC, no static keys), Trivy
-#   update-env-config main only: bump the tag in env-config (apps/idp-portal/overlays/dev)
+#   (in build)       main only: build the arm64 image, Trivy scan, then push to ECR (OIDC, no
+#                    static keys)
+#
+# Deploying is not this workflow's job any more: Argo CD Image Updater in the cluster sees the
+# new tag in ECR and commits it to idp-gitops (idp-gitops/platform/image-updater). Whatever is
+# in ECR gets deployed, so the scan runs BEFORE the push. This repo holds no deploy credential.
 #
 # Runs on GitHub's native ARM64 runners (free for public repos): the EKS nodes are
 # Graviton (t4g), so no QEMU emulation - a Backstage build under QEMU takes 30-60 min.
@@ -31,8 +35,6 @@ jobs:
     permissions:
       contents: read
       id-token: write          # OIDC to AWS (image step, main only)
-    outputs:
-      image_tag: ${{ github.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -57,6 +59,28 @@ jobs:
       - name: Build backend bundle
         run: yarn build:backend
 
+      # Built into the runner's Docker (native arm64); nothing is pushed yet.
+      - name: Build image (native arm64)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker build -f packages/backend/Dockerfile \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            -t "${ECR_IMAGE}:${GITHUB_SHA}" .
+
+      # HIGH/CRITICAL with a fix available fails the job here, before the push. An image that
+      # fails never reaches ECR, so Image Updater can never deploy it.
+      - name: Trivy vulnerability scan
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.ECR_IMAGE }}:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
       - name: Configure AWS credentials via OIDC
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
@@ -68,35 +92,16 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
-      - name: Build and push image (native arm64)
+      # "Re-run" of a green build: the SHA tag is immutable and already in ECR.
+      - name: Push image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker build -f packages/backend/Dockerfile \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-            -t "${ECR_IMAGE}:${GITHUB_SHA}" .
-          # "Re-run" of a green build: the SHA tag is immutable and already in ECR.
-          # Skip the push instead of failing; Trivy below still scans the local build.
           if aws ecr describe-images --repository-name idp-portal \
                --image-ids imageTag="${GITHUB_SHA}" >/dev/null 2>&1; then
             echo "Image ${GITHUB_SHA} already in ECR - skipping push"
           else
             docker push "${ECR_IMAGE}:${GITHUB_SHA}"
           fi
-
-      # Same gate as feature-flag-service: HIGH/CRITICAL with a fix available fails the
-      # job, so update-env-config never ships the image. The image is local here (native
-      # build, no buildx push), so Trivy scans it straight from the docker daemon.
-      - name: Trivy vulnerability scan
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.ECR_IMAGE }}:${{ github.sha }}
-          format: table
-          exit-code: '1'
-          ignore-unfixed: true
-          vuln-type: os,library
-          severity: HIGH,CRITICAL
 
   # A template change that would give developers a broken service fails here, before merge.
   # x64 runner: it has kubectl preinstalled, and this job only tests (no image is pushed).
@@ -145,43 +150,3 @@ jobs:
 
       - name: Render the template and test the result
         run: ./scripts/test-template.sh
-
-  update-env-config:
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Generate GitHub App installation token
-        id: app-token
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
-        with:
-          app-id: ${{ secrets.FF_IDP_CI_BOT_APP_ID }}
-          private-key: ${{ secrets.FF_IDP_CI_BOT_PRIVATE_KEY }}
-          owner: surya-idp
-          repositories: idp-gitops
-
-      - name: Bump idp-portal tag in env-config
-        env:
-          TOKEN: ${{ steps.app-token.outputs.token }}
-          NEW_TAG: ${{ needs.build.outputs.image_tag }}
-          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-        run: |
-          git clone "https://x-access-token:${TOKEN}@github.com/surya-idp/idp-gitops.git" env-config
-          cd env-config
-          F=apps/idp-portal/overlays/dev/kustomization.yaml
-          sed -i "s|newTag:.*|newTag: ${NEW_TAG}|" "$F"
-          # Commit as the App's bot user (name from the token, so an App rename needs no edit here)
-          BOT_ID=$(GH_TOKEN="${TOKEN}" gh api "/users/${APP_SLUG}[bot]" --jq .id)
-          git config user.name "${APP_SLUG}[bot]"
-          git config user.email "${BOT_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
-          git add "$F"
-          git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "chore(deploy): update idp-portal image to ${NEW_TAG}"
-          # Other CI bots push to the same repo; rebase onto theirs (different files) and retry.
-          for i in 1 2 3; do
-            git pull --rebase origin main && git push origin main && break
-            [ "$i" = 3 ] && exit 1
-            sleep $((i * 5))
-          done
