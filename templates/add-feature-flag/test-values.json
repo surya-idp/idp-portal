@@ -1,0 +1,11 @@
+{
+  "values": {
+    "entity": "component:default/template-ci",
+    "name": "new-checkout",
+    "description": "Shows the new checkout page",
+    "type": "percentage",
+    "enabled": false,
+    "rolloutPercentage": 25
+  },
+  "secrets": {}
+}

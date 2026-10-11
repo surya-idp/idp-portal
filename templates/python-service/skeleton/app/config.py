@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     # Set at image build time by CI (Dockerfile ARG GIT_SHA).
     git_sha: str = "unknown"
     log_level: str = "INFO"
+    # Feature flags (app/flags.py). Set by the platform for every service; empty outside the
+    # cluster, where every flag is its default.
+    flag_api_url: str = ""
+    flag_api_token_file: str = ""
+    flag_environment: str = "dev"
+    flag_api_timeout: float = 0.5
 
 
 @lru_cache

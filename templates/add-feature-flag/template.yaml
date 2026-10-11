@@ -1,0 +1,128 @@
+# idp day-2 template: create a feature flag for an existing golden-path service.
+#
+# Works for services from ANY golden-path template (it lists them by the platform marker,
+# contract: ../README.md) and changes no repository: a flag is data in the flag API, not code.
+#
+#   1. catalog:fetch      -> the chosen service's catalog entry (for its name)
+#   2. idp:flags:create   -> POST /flags on the flag API, stored as <service>.<flag>
+#
+# Who is allowed to do this: Backstage calls the flag API with its own Kubernetes
+# ServiceAccount token (no password, no API key), and the flag API lists that ServiceAccount
+# as an admin (idp-gitops apps/feature-flag-service). The flag API records the change in its
+# audit log.
+#
+# Why there is no catalog entry or pull request per flag: flags change often and are switched
+# by people who should not need a deploy. The flag API is their source of truth.
+#
+# Using the flag in a python-service: `await is_enabled("<flag>", user_id)` from app/flags.py.
+# The service authenticates with its own ServiceAccount token, mounted by the platform.
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: add-feature-flag
+  title: Add a feature flag
+  description: Creates a feature flag for an existing golden-path service. Switch it later without a deploy.
+  tags:
+    - day-2
+    - golden-path
+    - feature-flags
+spec:
+  owner: DSurya11
+  type: service
+
+  parameters:
+    - title: The flag
+      required: [entity, name, type]
+      properties:
+        entity:
+          title: Service
+          type: string
+          description: The service that will check this flag. The flag is stored under its name.
+          ui:field: EntityPicker
+          ui:options:
+            # The platform-wide marker, not one template's name (see ../README.md).
+            catalogFilter:
+              kind: Component
+              metadata.annotations.idp.surya-idp/template-version:
+                exists: true
+            defaultKind: Component
+        name:
+          title: Flag name
+          type: string
+          description: Short and lower-case, for example new-checkout. This is the name the code uses.
+          pattern: '^[a-z][a-z0-9-]*[a-z0-9]$'
+          maxLength: 60
+          ui:autofocus: true
+        description:
+          title: What it switches
+          type: string
+          description: One sentence for whoever finds this flag in a year.
+        type:
+          title: Type
+          type: string
+          default: boolean
+          enum: [boolean, percentage]
+          enumNames:
+            - On or off for everyone
+            - On for a percentage of users
+        enabled:
+          title: Start switched on
+          type: boolean
+          default: false
+          description: Usually off - ship the code dark, then switch it on.
+      # The percentage field appears only for a percentage flag.
+      dependencies:
+        type:
+          oneOf:
+            - properties:
+                type:
+                  enum: [boolean]
+            - required: [rolloutPercentage]
+              properties:
+                type:
+                  enum: [percentage]
+                rolloutPercentage:
+                  title: Percentage of users
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+                  default: 10
+                  description: The same user always gets the same answer.
+
+  steps:
+    - id: entity
+      name: Read the catalog entry
+      action: catalog:fetch
+      input:
+        entityRef: ${{ parameters.entity }}
+
+    - id: flag
+      name: Create the flag
+      action: idp:flags:create
+      input:
+        service: ${{ steps.entity.output.entity.metadata.name }}
+        name: ${{ parameters.name }}
+        type: ${{ parameters.type }}
+        enabled: ${{ parameters.enabled }}
+        rolloutPercentage: ${{ parameters.rolloutPercentage }}
+        description: ${{ parameters.description }}
+        environment: dev
+
+  output:
+    text:
+      - title: Use the flag
+        content: |
+          Flag `${{ steps.flag.output.flagName }}` is in the flag API (environment `dev`).
+
+          In a service created from the python-service template:
+
+          ```python
+          from app.flags import is_enabled
+
+          if await is_enabled("${{ parameters.name }}", user_id=user_id):
+              ...  # the new behaviour
+          ```
+
+          If the flag service cannot be reached, `is_enabled` returns `False` (or the `default=`
+          you pass). To switch the flag later, call the flag API (`PATCH /flags/{id}`); no deploy
+          is needed and services see the change within about 10 seconds.

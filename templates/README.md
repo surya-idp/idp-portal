@@ -5,13 +5,14 @@
 | `python-service` | creates | a FastAPI service: repo, shared CI, deploy config, route, docs, catalog entry |
 | `decommission-service` | day-2 | removes any golden-path service everywhere and archives its repo |
 | `add-postgres-database` | day-2 | gives any golden-path service its own database and login |
+| `add-feature-flag` | day-2 | creates a feature flag for any golden-path service in the flag API |
 
 All are listed in `all-templates.yaml`, the one file Backstage reads. Adding a template is a
 git push; no image rebuild.
 
 ## The contract between creation templates and day-2 templates
 
-Day-2 templates (decommission today; add-database, add-feature-flag later) must work for
+Day-2 templates (decommission, add-database, add-feature-flag) must work for
 services from **every** creation template, including ones that do not exist yet. So they never
 assume what a creation template made. Each creation template **records** it in the service's
 catalog entry, and day-2 templates read it from there.
