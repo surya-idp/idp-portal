@@ -56,6 +56,7 @@ export const ADMIN_ONLY_ACTIONS = [
   'idp:aws:s3:delete-docs',
   'idp:flags:delete-for-service',
   'idp:github:archive-repo',
+  'idp:github:delete-repo',
   'idp:catalog:unregister',
   'github:repo:delete',
 ];

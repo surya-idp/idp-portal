@@ -9,6 +9,7 @@
  *   listFiles           -> which files a PR must delete from the deploy repo
  *   deleteEcrRepository -> the service's images
  *   archiveRepository   -> the source repo (archived, not deleted: it can be restored)
+ *   deleteRepository    -> the source repo, for good (test services; an explicit choice)
  *   unregisterEntity    -> the catalog entry
  *   deleteDocs          -> the documentation site in the docs bucket (TechDocs)
  */
@@ -87,6 +88,45 @@ export async function deleteEcrRepository(options: {
       }`,
     );
   }
+}
+
+/**
+ * Deletes the repo for good. Only for throwaway services: an archived repo keeps its name
+ * taken, which gets in the way when the same test service is created again. Returns false
+ * when the repo did not exist.
+ *
+ * `protectedRepos` are names that must never be deleted whatever the input says (the
+ * platform's own repositories). The form cannot select them, but a catalog entry is data
+ * that someone could edit, and this cannot be undone.
+ */
+export async function deleteRepository(options: {
+  api: GitHubApi;
+  repo: RepoRef;
+  protectedRepos: string[];
+  log: (message: string) => void;
+}): Promise<boolean> {
+  const { api, repo, protectedRepos, log } = options;
+  const name = `${repo.owner}/${repo.repo}`;
+  if (
+    protectedRepos.some(
+      protectedName => protectedName.toLowerCase() === repo.repo.toLowerCase(),
+    )
+  ) {
+    throw new Error(
+      `Refusing to delete ${name}: it is one of the platform's own repositories`,
+    );
+  }
+  try {
+    await api.request('DELETE /repos/{owner}/{repo}', { ...repo });
+  } catch (error) {
+    if ((error as { status?: number }).status === 404) {
+      log(`${name} does not exist; nothing to delete`);
+      return false;
+    }
+    throw new Error(`Could not delete ${name}: ${(error as Error).message}`);
+  }
+  log(`Deleted ${name} for good (this cannot be undone)`);
+  return true;
 }
 
 /** Archives the repo (read-only, restorable). Returns false when it already was. */

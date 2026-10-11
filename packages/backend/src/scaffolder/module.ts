@@ -5,6 +5,7 @@
  *   idp:github:list-files            decommission-service
  *   idp:aws:ecr:delete-repository    decommission-service
  *   idp:github:archive-repo          decommission-service
+ *   idp:github:delete-repo           decommission-service (only when the form asks for it)
  *   idp:catalog:unregister           decommission-service
  *   idp:gitops:add-component         add-postgres-database (and any later opt-in component)
  *   idp:flags:create                 add-feature-flag
@@ -50,9 +51,23 @@ import {
   archiveRepository,
   deleteDocs,
   deleteEcrRepository,
+  deleteRepository,
   listFiles,
   unregisterEntity,
 } from './decommission';
+
+/**
+ * Repositories that idp:github:delete-repo refuses whatever its input says. The decommission
+ * form cannot select them (they carry no golden-path marker), but deleting cannot be undone,
+ * so the action checks for itself.
+ */
+const PLATFORM_REPOS = [
+  'idp-infra',
+  'idp-gitops',
+  'idp-portal',
+  'idp-platform',
+  'feature-flag-service',
+];
 
 export const idpScaffolderModule = createBackendModule({
   pluginId: 'scaffolder',
@@ -627,6 +642,57 @@ export const idpScaffolderModule = createBackendModule({
                 log: message => ctx.logger.info(message),
               });
               ctx.output('archived', archived);
+            },
+          }),
+
+          createTemplateAction({
+            id: 'idp:github:delete-repo',
+            description:
+              "Deletes a service's repository for good, as the GitHub App. For throwaway services only; the platform's own repositories are refused.",
+            supportsDryRun: true,
+            schema: {
+              input: {
+                projectSlug: z =>
+                  z.string({
+                    description:
+                      'The repository as <owner>/<name>, the value of the catalog annotation github.com/project-slug',
+                  }),
+              },
+              output: {
+                deleted: z => z.boolean(),
+              },
+            },
+            async handler(ctx) {
+              const match = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/.exec(
+                ctx.input.projectSlug,
+              );
+              if (!match) {
+                throw new InputError(
+                  `"${ctx.input.projectSlug}" is not an <owner>/<name> repository`,
+                );
+              }
+              const repo = {
+                host: 'github.com',
+                owner: match[1],
+                repo: match[2],
+              };
+              // A dry run must not call GitHub; the refusal of platform repos still applies.
+              const api: GitHubApi = ctx.isDryRun
+                ? {
+                    request: async () => ({ data: {} }),
+                    graphql: async () => ({}),
+                  }
+                : await githubClient(repo, ctx.logger);
+              const deleted = await deleteRepository({
+                api,
+                repo: { owner: repo.owner, repo: repo.repo },
+                protectedRepos: PLATFORM_REPOS,
+                log: message =>
+                  ctx.logger.info(
+                    ctx.isDryRun ? `Dry run: ${message}` : message,
+                  ),
+              });
+              ctx.output('deleted', deleted);
             },
           }),
 

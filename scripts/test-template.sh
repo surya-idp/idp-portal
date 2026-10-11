@@ -149,6 +149,27 @@ fi
 
 
 echo
+echo "    decommission-service with \"delete the repository\" ticked"
+python3 - "$DECOM/test-values.json" "$WORK/delete-values.json" <<'PY'
+import json, sys
+values = json.load(open(sys.argv[1]))
+values["values"]["deleteRepository"] = True
+json.dump(values, open(sys.argv[2], "w"))
+PY
+node scripts/template-dry-run.mjs "$DECOM" "$WORK/delete-values.json" "$WORK/decommission-delete" | tee "$WORK/delete.log"
+# Ticked: the delete step runs and the archive step does not. (The default run above is the
+# other way round, checked next.)
+grep -q '^\[delete\] (completed)' "$WORK/delete.log" || { echo "the delete step did not run"; exit 1; }
+grep '^\[archive\]' "$WORK/delete.log" | grep -q 'if condition was false' \
+  || { echo "the archive step should be skipped when deleting"; exit 1; }
+node scripts/template-dry-run.mjs "$DECOM" "$DECOM/test-values.json" "$WORK/decommission-default" > "$WORK/default.log"
+# (The archive action cannot run in a dry run, so "selected" means: not skipped by its condition.)
+grep '^\[archive\]' "$WORK/default.log" | grep -q 'if condition was false' \
+  && { echo "by default the repository must be archived"; exit 1; }
+grep '^\[delete\]' "$WORK/default.log" | grep -q 'if condition was false' \
+  || { echo "by default the repository must NOT be deleted"; exit 1; }
+
+echo
 echo "    decommission-service on a service from another template (no deployment, no image)"
 for _ in $(seq 1 30); do
   curl -sf -H "Authorization: Bearer $TEMPLATE_CI_TOKEN" -o /dev/null \

@@ -6,6 +6,7 @@ import {
   unregisterEntity,
   deleteDocs,
   DocsStore,
+  deleteRepository,
 } from './decommission';
 
 const repo = { owner: 'org', repo: 'gitops' };
@@ -254,5 +255,65 @@ describe('deleteDocs', () => {
       deleteDocs({ store, name: 'orders', log: jest.fn() }),
     ).rejects.toThrow(/outside/);
     expect(calls.deleted).toEqual([]);
+  });
+});
+
+describe('deleteRepository', () => {
+  const protectedRepos = ['idp-gitops', 'idp-portal'];
+  function fakeGitHubDelete(failWith?: { status: number; message: string }) {
+    const calls: string[] = [];
+    const api = {
+      request: async (route: string, params: any) => {
+        calls.push(`${route} ${params.owner}/${params.repo}`);
+        if (failWith)
+          throw Object.assign(new Error(failWith.message), failWith);
+        return { data: {} };
+      },
+      graphql: async () => ({}),
+    };
+    return { api, calls };
+  }
+  const repo = { owner: 'surya-idp', repo: 'orders' };
+
+  it('deletes the repository', async () => {
+    const { api, calls } = fakeGitHubDelete();
+    const log = jest.fn();
+    await expect(
+      deleteRepository({ api, repo, protectedRepos, log }),
+    ).resolves.toBe(true);
+    expect(calls).toEqual(['DELETE /repos/{owner}/{repo} surya-idp/orders']);
+    expect(log).toHaveBeenCalledWith(
+      'Deleted surya-idp/orders for good (this cannot be undone)',
+    );
+  });
+
+  it.each(['idp-gitops', 'IDP-Portal'])(
+    'never deletes the platform repository %p, and does not call GitHub',
+    async name => {
+      const { api, calls } = fakeGitHubDelete();
+      await expect(
+        deleteRepository({
+          api,
+          repo: { owner: 'surya-idp', repo: name },
+          protectedRepos,
+          log: jest.fn(),
+        }),
+      ).rejects.toThrow(/platform's own repositories/);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it('treats a repository that is already gone as done (safe to run twice)', async () => {
+    const { api } = fakeGitHubDelete({ status: 404, message: 'Not Found' });
+    await expect(
+      deleteRepository({ api, repo, protectedRepos, log: jest.fn() }),
+    ).resolves.toBe(false);
+  });
+
+  it('reports any other failure', async () => {
+    const { api } = fakeGitHubDelete({ status: 403, message: 'Forbidden' });
+    await expect(
+      deleteRepository({ api, repo, protectedRepos, log: jest.fn() }),
+    ).rejects.toThrow(/Could not delete surya-idp\/orders: Forbidden/);
   });
 });
