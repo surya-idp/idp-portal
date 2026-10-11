@@ -59,7 +59,11 @@ async def is_enabled(flag: str, user_id: str = "anonymous", *, default: bool = F
 
     # The standard library's HTTP client blocks, so it runs in a worker thread and the event
     # loop stays free for other requests.
-    answer = await asyncio.to_thread(_ask, flag, user_id, default)
+    answer = await asyncio.to_thread(_ask, flag, user_id)
+    if answer is None:
+        # No real answer (flag service down, or the flag does not exist). Not remembered:
+        # the default belongs to THIS call, and another call may pass a different one.
+        return default
     if len(_cache) > 10_000:
         _cache.clear()
     _cache[key] = (now + _CACHE_SECONDS, answer)
@@ -70,7 +74,8 @@ def clear_cache() -> None:
     _cache.clear()
 
 
-def _ask(flag: str, user_id: str, default: bool) -> bool:
+def _ask(flag: str, user_id: str) -> bool | None:
+    """The flag service's answer, or None when there is no real answer."""
     settings = get_settings()
     try:
         headers = {"Content-Type": "application/json"}
@@ -93,12 +98,13 @@ def _ask(flag: str, user_id: str, default: bool) -> bool:
         with urllib.request.urlopen(request, timeout=settings.flag_api_timeout) as response:
             body = json.load(response)
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        logger.warning("flag %s: using default %s (%s)", flag, default, exc)
-        return default
+        logger.warning("flag %s: no answer, using the default (%s)", flag, exc)
+        return None
 
     # The flag service answers "off" for a flag that does not exist. A typo or a flag nobody
     # created yet should give this call's default instead, and be visible in the logs.
     if not isinstance(body, dict) or body.get("reason") in _NO_ANSWER:
-        logger.warning("flag %s: using default %s (%s)", flag, default, body)
-        return default
-    return bool(body.get("enabled", default))
+        logger.warning("flag %s: no answer, using the default (%s)", flag, body)
+        return None
+    enabled = body.get("enabled")
+    return enabled if isinstance(enabled, bool) else None
