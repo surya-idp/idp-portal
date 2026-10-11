@@ -12,6 +12,7 @@
 # A step runs only when its annotation is present, so a template that creates no image
 # repository simply does not write that annotation, and nothing here needs to change.
 #
+#   0. idp:guard:platform-admin        -> stops anyone who is not a platform admin, before any change
 #   1. catalog:fetch                   -> the chosen service's catalog entry
 #   2. idp:github:list-files           -> every file under its gitops-path
 #   3. publish:github:pull-request     -> PR in idp-gitops deleting those files (the audit record)
@@ -66,6 +67,14 @@ spec:
           enum: [true]
 
   steps:
+    # First on purpose. The scaffolder checks whether the user may run an action when that
+    # step starts, not all steps up front. Without this, someone who is not a platform admin
+    # would get as far as merging the removal PR and only then be refused at "Delete the
+    # images": a half-removed service. This action is admin-only and changes nothing.
+    - id: guard
+      name: Check that you may remove services
+      action: idp:guard:platform-admin
+
     - id: entity
       name: Read the catalog entry
       action: catalog:fetch

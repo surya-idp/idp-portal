@@ -24,4 +24,16 @@ metadata:
 spec:
   profile:
     displayName: DSurya11
-  memberOf: []
+  memberOf: [platform-admins]
+---
+# Members may run destructive templates (decommission) and remove any catalog entry
+# (packages/backend/src/permissions/policy.ts). Everyone else who signs in can read
+# everything and create services, databases and flags.
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: platform-admins
+  description: Owns the platform; allowed to remove services
+spec:
+  type: team
+  children: []
